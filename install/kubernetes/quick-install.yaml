@@ -124,6 +124,7 @@ data:
 
   enable-xt-socket-fallback: "true"
   install-iptables-rules: "true"
+  install-no-conntrack-iptables-rules: "true"
 
   auto-direct-node-routes: "false"
   enable-bandwidth-manager: "true"
