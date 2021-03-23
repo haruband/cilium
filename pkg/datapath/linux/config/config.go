@@ -16,6 +16,7 @@ package config
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -23,6 +24,7 @@ import (
 	"net"
 	"reflect"
 	"sort"
+	"text/template"
 
 	"github.com/cilium/cilium/pkg/bpf"
 	"github.com/cilium/cilium/pkg/byteorder"
@@ -347,11 +349,12 @@ func (h *HeaderfileWriter) WriteNodeConfig(w io.Writer, cfg *datapath.LocalNodeC
 		cDefinesMap["NODEPORT_PORT_MIN_NAT"] = fmt.Sprintf("%d", option.Config.NodePortMax+1)
 		cDefinesMap["NODEPORT_PORT_MAX_NAT"] = "65535"
 
-		macro, err := isL3DevMacro()
+		macByIfIndexMacro, isL3DevMacro, err := devMacros()
 		if err != nil {
 			return err
 		}
-		cDefinesMap["IS_L3_DEV(ifindex)"] = macro
+		cDefinesMap["NATIVE_DEV_MAC_BY_IFINDEX(IFINDEX)"] = macByIfIndexMacro
+		cDefinesMap["IS_L3_DEV(ifindex)"] = isL3DevMacro
 	}
 	const (
 		selectionRandom = iota + 1
@@ -510,30 +513,58 @@ func (h *HeaderfileWriter) WriteNodeConfig(w io.Writer, cfg *datapath.LocalNodeC
 	return fw.Flush()
 }
 
-// isL3DevMacro is used to generate a macro function which is written to
-// node_config.h, and it is used to determine whether a given netdev is L2-less.
-func isL3DevMacro() (string, error) {
-	anyL3Dev := false
+// devMacros generates NATIVE_DEV_MAC_BY_IFINDEX and IS_L3_DEV macros which
+// are written to node_config.h.
+func devMacros() (string, string, error) {
+	var (
+		macByIfIndexMacro, isL3DevMacroBuf bytes.Buffer
+		isL3DevMacro                       string
+	)
+	macByIfIndex := make(map[int]string)
+	l3DevIfIndices := make([]int, 0)
 
-	macro := `({ \
-	bool is_l3 = false; \
-	switch (ifindex) { \`
 	for _, iface := range option.Config.Devices {
-		if link, err := netlink.LinkByName(iface); err != nil {
-			return "", err
-		} else if link.Attrs().HardwareAddr == nil {
-			anyL3Dev = true
-			macro += fmt.Sprintf("\ncase %d: is_l3 = true; break; \\", link.Attrs().Index)
+		link, err := netlink.LinkByName(iface)
+		if err != nil {
+			return "", "", fmt.Errorf("failed to retrieve link %s by name: %q", iface, err)
 		}
+		idx := link.Attrs().Index
+		m := link.Attrs().HardwareAddr
+		if m == nil {
+			l3DevIfIndices = append(l3DevIfIndices, idx)
+		}
+		macByIfIndex[idx] = mac.CArrayString(m)
 	}
-	macro += "\ndefault: break; \\"
-	macro += "\n} \\\n is_l3; })\n"
 
-	if !anyL3Dev {
-		return "false", nil
+	macByIfindexTmpl := template.Must(template.New("macByIfIndex").Parse(
+		`({ \
+union macaddr __mac = {.addr = {0x0, 0x0, 0x0, 0x0, 0x0, 0x0}}; \
+switch (IFINDEX) { \
+{{range $idx,$mac := .}} case {{$idx}}: {union macaddr __tmp = {.addr = {{$mac}}}; __mac=__tmp;} break; \
+{{end}}} \
+__mac; })`))
+
+	if err := macByIfindexTmpl.Execute(&macByIfIndexMacro, macByIfIndex); err != nil {
+		return "", "", fmt.Errorf("failed to execute template: %q", err)
 	}
 
-	return macro, nil
+	if len(l3DevIfIndices) == 0 {
+		isL3DevMacro = "false"
+	} else {
+		isL3DevTmpl := template.Must(template.New("isL3Dev").Parse(
+			`({ \
+bool is_l3 = false; \
+switch (ifindex) { \
+{{range $idx := .}} case {{$idx}}: is_l3 = true; break; \
+{{end}}} \
+is_l3; })`))
+		if err := isL3DevTmpl.Execute(&isL3DevMacroBuf, l3DevIfIndices); err != nil {
+			return "", "", fmt.Errorf("failed to execute template: %q", err)
+		}
+		isL3DevMacro = isL3DevMacroBuf.String()
+	}
+
+	return macByIfIndexMacro.String(), isL3DevMacro, nil
 }
 
 func (h *HeaderfileWriter) writeNetdevConfig(w io.Writer, cfg datapath.DeviceConfiguration) {

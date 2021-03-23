@@ -10,6 +10,8 @@
          https://github.com/openvswitch/ovs/blob/master/Documentation/internals/committer-grant-revocation.rst
          https://github.com/openvswitch/ovs/blob/master/Documentation/internals/committer-responsibilities.rst
 
+..       Additional ideas have been borrowed from https://github.com/envoyproxy/envoy/blob/main/GOVERNANCE.md
+
 ..       Licensed under the Apache License, Version 2.0 (the "License"); you may
          not use this file except in compliance with the License. You may obtain
          a copy of the License at
@@ -41,6 +43,8 @@ decisions without specifying deterministic rules that wouldn't be
 sensitive to the nuance of specific situations. In the end the decision
 to grant or revoke committer privileges is a judgment call made by the
 existing set of committers.
+
+For the list of current committers, see `Maintainers <https://raw.githubusercontent.com/cilium/cilium/master/MAINTAINERS.md>`_.
 
 Expectations for Developers with commit access
 ----------------------------------------------
@@ -140,20 +144,21 @@ demonstrated the following in their interaction with the project:
 
 The process to grant commit access to a candidate is simple:
 
--  An existing committer nominates the candidate by sending an email to
-   all existing committers with information substantiating the
-   contributions of the candidate in the areas described above.
+-  An existing committer nominates the candidate by sending a message in the
+   #committers Slack channel to all existing committers with information
+   substantiating the contributions of the candidate in the areas described
+   above.
 
 -  All existing committers discuss the pros and cons of granting commit
-   access to the candidate in the email thread.
+   access to the candidate in the Slack thread.
 
 -  When the discussion has converged or a reasonable time has elapsed
    without discussion developing (e.g. a few business days) the
    nominator calls for a final decision on the candidate with a followup
-   email to the thread.
+   Slack poll.
 
--  Each committer may vote yes, no, or abstain by replying to the email
-   thread. A failure to reply is an implicit abstention.
+-  Each committer may vote yes, no, or abstain by responding to the Slack poll.
+   A failure to reply is an implicit abstention.
 
 -  After votes from all existing committers have been collected or a
    reasonable time has elapsed for them to be provided (e.g. a couple of
@@ -162,7 +167,7 @@ The process to grant commit access to a candidate is simple:
    committers and zero no votes. Since a no vote is effectively a veto
    of the candidate it should be accompanied by a reason for the vote.
 
--  The nominator summarizes the result of the vote in an email to all
+-  The nominator summarizes the result of the vote in a Slack message to all
    existing committers.
 
 -  If the vote to grant commit access passed, the candidate is contacted
@@ -186,8 +191,8 @@ process in this case is:
    any other committer to the project may identify that committer as a
    candidate for revocation of commit access due to inactivity.
 
--  The plans of revocation should be sent in a private email to the
-   candidate.
+-  The plans of revocation should be sent in a private Slack message or email
+   to the candidate.
 
 -  If the candidate for removal states plans to continue participating
    no action is taken and this process terminates.
@@ -212,7 +217,7 @@ process in this case is:
    attempting to contact them, access is removed.
 
 -  In any case, where access is removed, this fact is published through
-   an email to all existing committers (including the candidate for
+   a Slack message to all existing committers (including the candidate for
    removal).
 
 The more difficult situation is a committer who is behaving in a manner
@@ -223,14 +228,14 @@ with care. The process in this case is:
 
 -  Discuss the behavior of concern with the individual privately and
    explain why you believe it is detrimental to the project. Stick to
-   the facts and keep the email professional. Avoid personal attacks and
-   the temptation to hypothesize about unknowable information such as
-   the other's motivations. Make it clear that you would prefer not to
-   discuss the behavior more widely but will have to raise it with other
-   contributors if it does not change. Ideally the behavior is
+   the facts and keep the Slack messages professional. Avoid personal
+   attacks and the temptation to hypothesize about unknowable information
+   such as the other's motivations. Make it clear that you would prefer
+   not to discuss the behavior more widely but will have to raise it with
+   other contributors if it does not change. Ideally the behavior is
    eliminated and no further action is required. If not,
 
--  Start an email thread with all committers, including the source of
+-  Start a Slack thread with all committers, including the source of
    the behavior, describing the behavior and the reason it is
    detrimental to the project. The message should have the same tone as
    the private discussion and should generally repeat the same points
@@ -239,15 +244,16 @@ with care. The process in this case is:
    discussion. Ideally the wider discussion provides more perspective to
    all participants and the issue is resolved. If not,
 
--  Start an email thread with all committers except the source of the
+-  Start a Slack thread with all committers except the source of the
    detrimental behavior requesting a vote on revocation of commit
    rights. Cite the discussion among all committers and describe all the
-   reasons why it was not resolved satisfactorily. This email should be
-   carefully written with the knowledge that the reasoning it contains
-   may be published to the larger community to justify the decision.
+   reasons why it was not resolved satisfactorily. The Slack message
+   should be carefully written with the knowledge that the reasoning it
+   contains may be published to the larger community to justify the
+   decision.
 
--  Each committer may vote yes, no, or abstain by replying to the email
-   thread. A failure to reply is an implicit abstention.
+-  Each committer may vote yes, no, or abstain by responding to the
+   Slack poll. A failure to reply is an implicit abstention.
 
 -  After all votes have been collected or a reasonable time has elapsed
    for them to be provided (e.g. a couple of business days) the votes
@@ -264,12 +270,12 @@ with care. The process in this case is:
    surfaced in the discussion before the vote.
 
 -  The original person to propose revocation summarizes the result of
-   the vote in an email to all existing committers excepting the
+   the vote in a Slack message to all existing committers excepting the
    candidate for removal.
 
 -  If the vote to revoke commit access passes, access is removed and the
    candidate for revocation is informed of that fact and the reasons for
-   it as documented in the email requesting the revocation vote.
+   it as documented in the Slack message requesting the revocation vote.
 
 -  Ideally the revoked committer peacefully leaves the community and no
    further action is required. However, there is a distinct possibility
@@ -283,7 +289,7 @@ Changing the Policy
 
 The process for changing the policy is:
 
--  Propose the changes to the policy in an email to all current
+-  Propose the changes to the policy in a Slack message to all current
    committers and request discussion.
 
 -  After an appropriate period of discussion (a few days) update the
@@ -295,8 +301,36 @@ The process for changing the policy is:
    are evaluated. For the request to modify the policy to pass it must
    receive yes votes from two thirds of the existing committers.
 
-Template Emails
-===============
+
+Voting
+======
+
+In general, we prefer that technical issues and maintainer membership are
+amicably worked out between the persons involved. If a dispute cannot be
+decided independently, the committers and maintainers can be called in to
+decide an issue. If the maintainers themselves cannot decide an issue, the
+issue will be resolved by voting. The voting process is a simple majority in
+which each committer and each maintainer receives one vote.
+
+Votes are done in the Slack channel #committers using Slack polls. A failure to
+vote is an implicit abstention.
+
+Company Block Vote Limit
+------------------------
+
+In the spirit of ensuring a diverse community, the number of votes a single
+company can receive is limited to 6 votes. The company affiliation of
+maintainers and committers is documented in the MAINTAINERS.md file.
+
+Votes are counted within the company association and then broken down
+proportionally. Example: 7 committers from a company vote, 6 votes yes,
+1 vote no.
+
+ * 6 / (7/6) = 5.14 = 5 votes yes
+ * 1 / (7/6) = 0.85 = 1 vote no
+
+Templates
+=========
 
 Nomination to Grant Commit Access
 ---------------------------------

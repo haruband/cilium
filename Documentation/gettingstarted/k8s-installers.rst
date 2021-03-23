@@ -20,6 +20,8 @@ any installer.
    k8s-install-kops
    k8s-install-kubespray
    k8s-install-kubeadm
+   k8s-install-rancher-existing-nodes
+   k8s-install-rke
 
 External Guides
 ===============

@@ -17,7 +17,6 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"os"
 	"path"
@@ -910,6 +909,9 @@ func init() {
 	flags.Int(option.LBMapEntriesName, lbmap.MaxEntries, "Maximum number of entries in Cilium BPF lbmap")
 	option.BindEnv(option.LBMapEntriesName)
 
+	flags.String(option.LocalRouterIP, "", "Link-local IP used for Cilium's router devices")
+	option.BindEnv(option.LocalRouterIP)
+
 	flags.String(option.K8sServiceProxyName, "", "Value of K8s service-proxy-name label for which Cilium handles the services (empty = all services without service.kubernetes.io/service-proxy-name label)")
 	option.BindEnv(option.K8sServiceProxyName)
 
@@ -1342,6 +1344,21 @@ func initEnv(cmd *cobra.Command) {
 		option.Config.NeedsRelaxVerifier = true
 	}
 
+	if option.Config.LocalRouterIP != "" {
+		if option.Config.IPAM != "" {
+			log.Fatalf("Cannot specify %s along with %s, leave router IP unspecified if Cilium is handling IPAM.", option.LocalRouterIP, option.IPAM)
+		}
+		if option.Config.Tunnel != option.TunnelDisabled {
+			log.Fatalf("Cannot specify %s in tunnel mode.", option.LocalRouterIP)
+		}
+		if !option.Config.EnableEndpointRoutes {
+			log.Fatalf("Cannot specify %s without %s.", option.LocalRouterIP, option.EnableEndpointRoutes)
+		}
+		if option.Config.EnableIPSec {
+			log.Fatalf("Cannot specify %s with %s.", option.LocalRouterIP, option.EnableIPSecName)
+		}
+	}
+
 	if option.Config.IPAM == ipamOption.IPAMAzure {
 		option.Config.EgressMultiHomeIPRuleCompat = true
 		log.WithFields(logrus.Fields{
@@ -1597,12 +1614,12 @@ func runDaemon() {
 		Info("Daemon initialization completed")
 
 	if option.Config.WriteCNIConfigurationWhenReady != "" {
-		input, err := ioutil.ReadFile(option.Config.ReadCNIConfiguration)
+		input, err := os.ReadFile(option.Config.ReadCNIConfiguration)
 		if err != nil {
 			log.WithError(err).Fatal("Unable to read CNI configuration file")
 		}
 
-		if err = ioutil.WriteFile(option.Config.WriteCNIConfigurationWhenReady, input, 0644); err != nil {
+		if err = os.WriteFile(option.Config.WriteCNIConfigurationWhenReady, input, 0644); err != nil {
 			log.WithError(err).Fatalf("Unable to write CNI configuration file to %s", option.Config.WriteCNIConfigurationWhenReady)
 		} else {
 			log.Infof("Wrote CNI configuration file to %s", option.Config.WriteCNIConfigurationWhenReady)

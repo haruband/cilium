@@ -62,7 +62,7 @@ static __always_inline int ipv6_l3_from_lxc(struct __ctx_buff *ctx,
 #ifdef ENABLE_ROUTING
 	union macaddr router_mac = NODE_MAC;
 #endif
-	int ret, verdict, l4_off, hdrlen;
+	int ret, verdict = 0, l4_off, hdrlen;
 	struct csum_offset csum_off = {};
 	struct ct_state ct_state_new = {};
 	struct ct_state ct_state = {};
@@ -173,12 +173,22 @@ skip_service_lookup:
 			   orig_dip.p4, *dstID);
 	}
 
+	/* When an endpoint connects to itself via service clusterIP, we need
+	 * to skip the policy enforcement. If we didn't, the user would have to
+	 * define policy rules to allow pods to talk to themselves. We still
+	 * want to execute the conntrack logic so that replies can be correctly
+	 * matched.
+	 */
+	if (hairpin_flow)
+		goto skip_policy_enforcement;
+
 	/* If the packet is in the establishing direction and it's destined
 	 * within the cluster, it must match policy or be dropped. If it's
 	 * bound for the host/outside, perform the CIDR policy check.
 	 */
 	verdict = policy_can_egress6(ctx, tuple, SECLABEL, *dstID,
 				     &policy_match_type, &audited);
+
 	if (ret != CT_REPLY && ret != CT_RELATED && verdict < 0) {
 		send_policy_verdict_notify(ctx, *dstID, tuple->dport,
 					   tuple->nexthdr, POLICY_EGRESS, 1,
@@ -186,11 +196,13 @@ skip_service_lookup:
 		return verdict;
 	}
 
+skip_policy_enforcement:
 	switch (ret) {
 	case CT_NEW:
-		send_policy_verdict_notify(ctx, *dstID, tuple->dport,
-					   tuple->nexthdr, POLICY_EGRESS, 1,
-					   verdict, policy_match_type, audited);
+		if (!hairpin_flow)
+			send_policy_verdict_notify(ctx, *dstID, tuple->dport,
+						   tuple->nexthdr, POLICY_EGRESS, 1,
+						   verdict, policy_match_type, audited);
 ct_recreate6:
 		/* New connection implies that rev_nat_index remains untouched
 		 * to the index provided by the loadbalancer (if it applied).
@@ -206,9 +218,10 @@ ct_recreate6:
 		break;
 
 	case CT_REOPENED:
-		send_policy_verdict_notify(ctx, *dstID, tuple->dport,
-					   tuple->nexthdr, POLICY_EGRESS, 1,
-					   verdict, policy_match_type, audited);
+		if (!hairpin_flow)
+			send_policy_verdict_notify(ctx, *dstID, tuple->dport,
+						   tuple->nexthdr, POLICY_EGRESS, 1,
+						   verdict, policy_match_type, audited);
 	case CT_ESTABLISHED:
 		/* Did we end up at a stale non-service entry? Recreate if so. */
 		if (unlikely(ct_state.rev_nat_index != ct_state_new.rev_nat_index))
@@ -450,7 +463,7 @@ static __always_inline int handle_ipv4_from_lxc(struct __ctx_buff *ctx,
 #endif
 	void *data, *data_end;
 	struct iphdr *ip4;
-	int ret, verdict, l3_off = ETH_HLEN, l4_off;
+	int ret, verdict = 0, l3_off = ETH_HLEN, l4_off;
 	struct csum_offset csum_off = {};
 	struct ct_state ct_state_new = {};
 	struct ct_state ct_state = {};
@@ -552,6 +565,15 @@ skip_service_lookup:
 			   orig_dip, *dstID);
 	}
 
+	/* When an endpoint connects to itself via service clusterIP, we need
+	 * to skip the policy enforcement. If we didn't, the user would have to
+	 * define policy rules to allow pods to talk to themselves. We still
+	 * want to execute the conntrack logic so that replies can be correctly
+	 * matched.
+	 */
+	if (hairpin_flow)
+		goto skip_policy_enforcement;
+
 	/* If the packet is in the establishing direction and it's destined
 	 * within the cluster, it must match policy or be dropped. If it's
 	 * bound for the host/outside, perform the CIDR policy check.
@@ -566,11 +588,13 @@ skip_service_lookup:
 		return verdict;
 	}
 
+skip_policy_enforcement:
 	switch (ret) {
 	case CT_NEW:
-		send_policy_verdict_notify(ctx, *dstID, tuple.dport,
-					   tuple.nexthdr, POLICY_EGRESS, 0,
-					   verdict, policy_match_type, audited);
+		if (!hairpin_flow)
+			send_policy_verdict_notify(ctx, *dstID, tuple.dport,
+						   tuple.nexthdr, POLICY_EGRESS, 0,
+						   verdict, policy_match_type, audited);
 ct_recreate4:
 		/* New connection implies that rev_nat_index remains untouched
 		 * to the index provided by the loadbalancer (if it applied).
@@ -588,9 +612,10 @@ ct_recreate4:
 		break;
 
 	case CT_REOPENED:
-		send_policy_verdict_notify(ctx, *dstID, tuple.dport,
-					   tuple.nexthdr, POLICY_EGRESS, 0,
-					   verdict, policy_match_type, audited);
+		if (!hairpin_flow)
+			send_policy_verdict_notify(ctx, *dstID, tuple.dport,
+						   tuple.nexthdr, POLICY_EGRESS, 0,
+						   verdict, policy_match_type, audited);
 	case CT_ESTABLISHED:
 		/* Did we end up at a stale non-service entry? Recreate if so. */
 		if (unlikely(ct_state.rev_nat_index != ct_state_new.rev_nat_index))
@@ -812,7 +837,9 @@ int tail_handle_arp(struct __ctx_buff *ctx)
 #endif /* ENABLE_ARP_RESPONDER */
 #endif /* ENABLE_IPV4 */
 
-/* Attachment/entry point is ingress for veth, egress for ipvlan. */
+/* Attachment/entry point is ingress for veth, egress for ipvlan.
+ * It corresponds to packets leaving the container.
+ */
 __section("from-container")
 int handle_xgress(struct __ctx_buff *ctx)
 {
@@ -1110,7 +1137,7 @@ ipv4_policy(struct __ctx_buff *ctx, int ifindex, __u32 src_label, __u8 *reason,
 	void *data, *data_end;
 	struct iphdr *ip4;
 	struct csum_offset csum_off = {};
-	int ret, verdict, l3_off = ETH_HLEN, l4_off;
+	int ret, verdict = 0, l3_off = ETH_HLEN, l4_off;
 	struct ct_state ct_state = {};
 	struct ct_state ct_state_new = {};
 	bool skip_ingress_proxy = false;
@@ -1187,6 +1214,17 @@ ipv4_policy(struct __ctx_buff *ctx, int ifindex, __u32 src_label, __u8 *reason,
 			return ret2;
 	}
 
+#if !defined(ENABLE_HOST_SERVICES_FULL) && !defined(DISABLE_LOOPBACK_LB)
+	/* When an endpoint connects to itself via service clusterIP, we need
+	 * to skip the policy enforcement. If we didn't, the user would have to
+	 * define policy rules to allow pods to talk to themselves. We still
+	 * want to execute the conntrack logic so that replies can be correctly
+	 * matched.
+	 */
+	if (unlikely(ct_state.loopback))
+		goto skip_policy_enforcement;
+#endif /* !ENABLE_HOST_SERVICES_FULL && !DISABLE_LOOPBACK_LB */
+
 	verdict = policy_can_access_ingress(ctx, src_label, SECLABEL,
 					    tuple.dport, tuple.nexthdr,
 					    is_untracked_fragment,
@@ -1210,6 +1248,10 @@ ipv4_policy(struct __ctx_buff *ctx, int ifindex, __u32 src_label, __u8 *reason,
 					   tuple.nexthdr, POLICY_INGRESS, 0,
 					   verdict, policy_match_type, audited);
 	}
+
+#if !defined(ENABLE_HOST_SERVICES_FULL) && !defined(DISABLE_LOOPBACK_LB)
+skip_policy_enforcement:
+#endif /* !ENABLE_HOST_SERVICES_FULL && !DISABLE_LOOPBACK_LB */
 
 	if (ret == CT_NEW) {
 #ifdef ENABLE_DSR
@@ -1362,6 +1404,10 @@ out:
  * contents of ctx / CB_SRC_LABEL. Determine whether the traffic may be
  * passed into the endpoint or if it needs further inspection by a userspace
  * proxy.
+ *
+ * This program will be tail called to in ipv{4,6}_local_delivery from either
+ * bpf_host, bpf_overlay (if coming from the tunnel), or bpf_lxc (if coming
+ * from another local pod).
  */
 __section_tail(CILIUM_MAP_POLICY, TEMPLATE_LXC_ID)
 int handle_policy(struct __ctx_buff *ctx)
@@ -1456,6 +1502,9 @@ drop_err:
 #endif
 BPF_LICENSE("GPL");
 
+/* Attached to the lxc device on the way to the container, only if endpoint
+ * routes are enabled.
+ */
 __section("to-container")
 int handle_to_container(struct __ctx_buff *ctx)
 {

@@ -29,6 +29,7 @@ import (
 	"github.com/cilium/cilium/pkg/controller"
 	"github.com/cilium/cilium/pkg/datapath"
 	"github.com/cilium/cilium/pkg/endpoint"
+	"github.com/cilium/cilium/pkg/ip"
 	"github.com/cilium/cilium/pkg/k8s"
 	k8smetrics "github.com/cilium/cilium/pkg/k8s/metrics"
 	slim_corev1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/api/core/v1"
@@ -514,8 +515,10 @@ func (k *K8sWatcher) delK8sSVCs(svc k8s.ServiceID, svcInfo *k8s.Service, se *k8s
 		}
 		repPorts[svcPort.Port] = false
 
-		fe := loadbalancer.NewL3n4Addr(svcPort.Protocol, svcInfo.FrontendIP, svcPort.Port, loadbalancer.ScopeExternal)
-		frontends = append(frontends, fe)
+		for _, feIP := range svcInfo.FrontendIPs {
+			fe := loadbalancer.NewL3n4Addr(svcPort.Protocol, feIP, svcPort.Port, loadbalancer.ScopeExternal)
+			frontends = append(frontends, fe)
+		}
 
 		for _, nodePortFE := range svcInfo.NodePorts[portName] {
 			frontends = append(frontends, &nodePortFE.L3n4Addr)
@@ -570,15 +573,19 @@ func genCartesianProduct(
 	}
 
 	svcs := make([]loadbalancer.SVC, 0, svcSize)
+	feFamilyIPv6 := ip.IsIPv6(fe)
 
 	for fePortName, fePort := range ports {
 		var besValues []loadbalancer.Backend
-		for ip, backend := range bes.Backends {
-			if backendPort := backend.Ports[string(fePortName)]; backendPort != nil {
+		for netIP, backend := range bes.Backends {
+			parsedIP := net.ParseIP(netIP)
+
+			if backendPort := backend.Ports[string(fePortName)]; backendPort != nil && feFamilyIPv6 == ip.IsIPv6(parsedIP) {
 				besValues = append(besValues, loadbalancer.Backend{
 					NodeName: backend.NodeName,
 					L3n4Addr: loadbalancer.L3n4Addr{
-						IP: net.ParseIP(ip), L4Addr: *backendPort,
+						IP:     parsedIP,
+						L4Addr: *backendPort,
 					},
 				})
 			}
@@ -637,10 +644,12 @@ func datapathSVCs(svc *k8s.Service, endpoints *k8s.Endpoints) (svcs []loadbalanc
 		uniqPorts[fePort.Port] = false
 		clusterIPPorts[fePortName] = fePort
 	}
-	if svc.FrontendIP != nil {
-		dpSVC := genCartesianProduct(svc.FrontendIP, svc.TrafficPolicy, loadbalancer.SVCTypeClusterIP, clusterIPPorts, endpoints)
+
+	for _, frontendIP := range svc.FrontendIPs {
+		dpSVC := genCartesianProduct(frontendIP, svc.TrafficPolicy, loadbalancer.SVCTypeClusterIP, clusterIPPorts, endpoints)
 		svcs = append(svcs, dpSVC...)
 	}
+
 	for _, ip := range svc.LoadBalancerIPs {
 		dpSVC := genCartesianProduct(ip, svc.TrafficPolicy, loadbalancer.SVCTypeLoadBalancer, clusterIPPorts, endpoints)
 		svcs = append(svcs, dpSVC...)

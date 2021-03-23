@@ -19,7 +19,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"os"
 	"path/filepath"
@@ -156,7 +155,7 @@ var (
 		"cni.binPath":                 "/home/kubernetes/bin",
 		"gke.enabled":                 "true",
 		"loadBalancer.mode":           "snat",
-		"nativeRoutingCIDR":           "10.0.0.0/8",
+		"nativeRoutingCIDR":           GKENativeRoutingCIDR(),
 		"hostFirewall":                "false",
 		"ipam.mode":                   "kubernetes",
 		"devices":                     "", // Override "eth0 eth0\neth0"
@@ -1119,6 +1118,18 @@ func (kub *Kubectl) GetServiceHostPort(namespace string, service string) (string
 		return "", 0, fmt.Errorf("Service '%s' does not have ports defined", service)
 	}
 	return data.Spec.ClusterIP, int(data.Spec.Ports[0].Port), nil
+}
+
+// GetServiceClusterIPs returns the list of cluster IPs associated with the service. The support
+// for this is only present in later version of Kubernetes(>= 1.20).
+func (kub *Kubectl) GetServiceClusterIPs(namespace string, service string) ([]string, error) {
+	var data v1.Service
+	err := kub.Get(namespace, "service "+service).Unmarshal(&data)
+	if err != nil {
+		return nil, err
+	}
+
+	return data.Spec.ClusterIPs, nil
 }
 
 // GetLoadBalancerIP waits until a loadbalancer IP addr has been assigned for
@@ -2642,16 +2653,6 @@ func (kub *Kubectl) CiliumEndpointsList(ctx context.Context, pod string) *CmdRes
 	return kub.CiliumExecContext(ctx, pod, "cilium endpoint list -o json")
 }
 
-// CiliumEndpointsStatus returns a mapping  of a pod name to it is corresponding
-// endpoint's status
-func (kub *Kubectl) CiliumEndpointsStatus(pod string) map[string]string {
-	filter := `{range [*]}{@.status.external-identifiers.pod-name}{"="}{@.status.state}{"\n"}{end}`
-	ctx, cancel := context.WithTimeout(context.Background(), ShortCommandTimeout)
-	defer cancel()
-	return kub.CiliumExecContext(ctx, pod, fmt.Sprintf(
-		"cilium endpoint list -o jsonpath='%s'", filter)).KVOutput()
-}
-
 // CiliumEndpointIPv6 returns the IPv6 address of each endpoint which matches
 // the given endpoint selector.
 func (kub *Kubectl) CiliumEndpointIPv6(pod string, endpoint string) map[string]string {
@@ -3372,7 +3373,7 @@ func (kub *Kubectl) ValidateListOfErrorsInLogs(duration time.Duration, blacklist
 					kub.Logger().WithError(err).Error("Cannot create report directory")
 					return
 				}
-				err = ioutil.WriteFile(
+				err = os.WriteFile(
 					fmt.Sprintf("%s/%s", testPath, file),
 					[]byte(logs), LogPerm)
 
@@ -4107,7 +4108,7 @@ func (kub *Kubectl) reportMapContext(ctx context.Context, path string, reportCmd
 		}
 
 		for name, res := range results {
-			err := ioutil.WriteFile(
+			err := os.WriteFile(
 				fmt.Sprintf("%s/%s-%s", path, name, logfile),
 				res.CombineOutput().Bytes(),
 				LogPerm)
@@ -4131,7 +4132,7 @@ func (kub *Kubectl) reportMapHost(ctx context.Context, path string, reportCmds m
 				log.WithError(res.GetErr("reportMapHost")).Errorf("command %s failed", cmd)
 			}
 
-			err := ioutil.WriteFile(
+			err := os.WriteFile(
 				fmt.Sprintf("%s/%s", path, logfile),
 				res.CombineOutput().Bytes(),
 				LogPerm)

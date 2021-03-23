@@ -17,7 +17,6 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
@@ -99,6 +98,14 @@ func defaultCommands(confDir string, cmdDir string, k8sPods []string) []string {
 		"ip6tables -S",
 		"iptables -L -v",
 		"ip rule",
+		"iptables-legacy -L -v",
+		"iptables-legacy -S",
+		"ip6tables-legacy -S",
+		"iptables-nft -L -v",
+		"iptables-nft -S",
+		"ip6tables-nft -S",
+		"iptables-nft-save -c",
+		"iptables-legacy-save -c",
 		// xfrm
 		"ip xfrm policy",
 		"ip -s xfrm state | awk '!/auth|enc|aead|auth-trunc|comp/'",
@@ -156,7 +163,7 @@ func save(c *BugtoolConfiguration, path string) error {
 	if err != nil {
 		return fmt.Errorf("Cannot marshal config %s", err)
 	}
-	err = ioutil.WriteFile(path, data, 0644)
+	err = os.WriteFile(path, data, 0644)
 	if err != nil {
 		return fmt.Errorf("Cannot write config %s", err)
 	}
@@ -166,7 +173,7 @@ func save(c *BugtoolConfiguration, path string) error {
 func loadConfigFile(path string) (*BugtoolConfiguration, error) {
 	var content []byte
 	var err error
-	content, err = ioutil.ReadFile(path)
+	content, err = os.ReadFile(path)
 
 	if err != nil {
 		return nil, err

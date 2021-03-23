@@ -58,7 +58,6 @@ Advanced Networking
    aws-eni
    kube-router
    bird
-   clustermesh
    flannel-integration
    ipvlan
    encryption
@@ -68,6 +67,17 @@ Advanced Networking
    kata
    ipam
    local-redirect-policy
+
+Cluster Mesh
+------------
+
+.. toctree::
+   :maxdepth: 1
+   :glob:
+
+   clustermesh/clustermesh
+   clustermesh/services
+   clustermesh/policy
 
 Operations
 ----------
@@ -87,15 +97,6 @@ Istio
    :glob:
 
    istio
-
-Other Orchestrators
--------------------
-
-.. toctree::
-   :maxdepth: 1
-   :glob:
-
-   docker
 
 The best way to get help if you get stuck is to ask a question on the `Cilium
 Slack channel <https://cilium.herokuapp.com>`_.  With Cilium contributors

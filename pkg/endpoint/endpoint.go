@@ -489,9 +489,7 @@ func CreateHostEndpoint(owner regeneration.Owner, proxy EndpointProxy, allocator
 	ep := createEndpoint(owner, proxy, allocator, 0, ifName)
 	ep.isHost = true
 	ep.nodeMAC = mac
-	ep.DatapathConfiguration = models.EndpointDatapathConfiguration{
-		RequireEgressProg: true,
-	}
+	ep.DatapathConfiguration = NewDatapathConfiguration()
 
 	ep.setState(StateWaitingForIdentity, "Endpoint creation")
 
@@ -800,7 +798,7 @@ func parseBase64ToEndpoint(b []byte, ep *Endpoint) error {
 }
 
 // FilterEPDir returns a list of directories' names that possible belong to an endpoint.
-func FilterEPDir(dirFiles []os.FileInfo) []string {
+func FilterEPDir(dirFiles []os.DirEntry) []string {
 	eptsID := []string{}
 	for _, file := range dirFiles {
 		if file.IsDir() {
@@ -849,6 +847,9 @@ func parseEndpoint(ctx context.Context, owner regeneration.Owner, bEp []byte) (*
 	// If host label is present, it's the host endpoint.
 	ep.isHost = ep.HasLabels(labels.LabelHost)
 
+	// Overwrite datapath configuration with the current agent configuration.
+	ep.DatapathConfiguration = NewDatapathConfiguration()
+
 	// We need to check for nil in Status, CurrentStatuses and Log, since in
 	// some use cases, status will be not nil and Cilium will eventually
 	// error/panic if CurrentStatus or Log are not initialized correctly.
@@ -868,6 +869,28 @@ func parseEndpoint(ctx context.Context, owner regeneration.Owner, bEp []byte) (*
 	ep.setState(StateRestoring, "Endpoint restoring")
 
 	return &ep, nil
+}
+
+// NewDatapathConfiguration return the default endpoint datapath configuration
+// based on whether per-endpoint routes are enabled.
+func NewDatapathConfiguration() models.EndpointDatapathConfiguration {
+	config := models.EndpointDatapathConfiguration{}
+	if option.Config.EnableEndpointRoutes {
+		// Indicate to insert a per endpoint route instead of routing
+		// via cilium_host interface
+		config.InstallEndpointRoute = true
+
+		// Since routing occurs via endpoint interface directly, BPF
+		// program is needed on that device at egress as BPF program on
+		// cilium_host interface is bypassed
+		config.RequireEgressProg = true
+
+		// Delegate routing to the Linux stack rather than tail-calling
+		// between BPF programs.
+		disabled := false
+		config.RequireRouting = &disabled
+	}
+	return config
 }
 
 func (e *Endpoint) LogStatus(typ StatusType, code StatusCode, msg string) {

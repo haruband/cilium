@@ -28,6 +28,7 @@ EXPERIMENTAL_INSTALL := "$(ROOT_DIR)/$(RELATIVE_DIR)/experimental-install.yaml"
 CILIUM_CHARTS := "$(ROOT_DIR)/$(RELATIVE_DIR)/cilium"
 CILIUM_VALUES := "$(CILIUM_CHARTS)/values.yaml"
 CHART_FILE := "$(CILIUM_CHARTS)/Chart.yaml"
+USE_DIGESTS ?= $(shell if grep -q '""' Makefile.digests; then echo "false"; else echo "true"; fi)
 
 VERSION_REGEX := '[0-9]\+\.[0-9]\+\.[0-9]\+.*'
 LATEST_VERSION_REGEX := '[0-9]\+\.[0-9]\+\.90'
@@ -89,7 +90,7 @@ update-versions:
 		branch="$$cilium_version";											\
 		hubble_version=$(HUBBLE_UI_VERSION);										\
 		pull_policy="IfNotPresent";											\
-		use_digest="true";													\
+		use_digest="$(USE_DIGESTS)";													\
 		if echo "$(VERSION)" | grep -q $(LATEST_VERSION_REGEX); then							\
 			cilium_version="latest";										\
 			branch="master";											\
@@ -123,9 +124,9 @@ update-versions:
 		# image digests;													\
 		sed -i '/# cilium-digest.*/{!b;n;s/digest.*/digest: "'$(CILIUM_DIGEST)'"/}' $(CILIUM_VALUES); 				\
 		sed -i '/# hubble-relay-digest.*/{!b;n;s/digest.*/digest: "'$(HUBBLE_RELAY_DIGEST)'"/}' $(CILIUM_VALUES);			\
-		sed -i '/# operator-aws-digest.*/{!b;n;s/aws-digest.*/aws-digest: "'$(OPERATOR_AWS_DIGEST)'"/}' $(CILIUM_VALUES); 		\
-		sed -i '/# operator-azure-digest.*/{!b;n;s/azure-digest.*/azure-digest: "'$(OPERATOR_AZURE_DIGEST)'"/}' $(CILIUM_VALUES); 	\
-		sed -i '/# operator-generic-digest.*/{!b;n;s/generic-digest.*/generic-digest: "'$(OPERATOR_GENERIC_DIGEST)'"/}' $(CILIUM_VALUES); \
+		sed -i '/# operator-aws-digest.*/{!b;n;s/awsDigest.*/awsDigest: "'$(OPERATOR_AWS_DIGEST)'"/}' $(CILIUM_VALUES);                 \
+		sed -i '/# operator-azure-digest.*/{!b;n;s/azureDigest.*/azureDigest: "'$(OPERATOR_AZURE_DIGEST)'"/}' $(CILIUM_VALUES);         \
+		sed -i '/# operator-generic-digest.*/{!b;n;s/genericDigest.*/genericDigest: "'$(OPERATOR_GENERIC_DIGEST)'"/}' $(CILIUM_VALUES); \
 		sed -i '/# clustermesh-apiserver-digest.*/{!b;n;s/digest.*/digest: "'$(CLUSTERMESH_APISERVER_DIGEST)'"/}' $(CILIUM_VALUES)
 
 lint:

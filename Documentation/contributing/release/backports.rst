@@ -26,6 +26,7 @@ minor version of Cilium, for example in a ``v1.2.z`` release prior to the
 release of version ``v1.3.0``:
 
 - All bugfixes
+- Debug tool improvements
 
 Backport Criteria for X.Y-1.Z and X.Y-2.Z
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -36,7 +37,16 @@ the release of version ``v1.3.0``:
 
 - Security relevant fixes
 - Major bugfixes relevant to the correct operation of Cilium
+- Debug tool improvements
 
+Proposing PRs for backporting
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+PRs are proposed for backporting by adding a ``needs-backport/X.Y`` label to
+them. Normally this is done by the author when the PR is created or one of the
+maintainers when the PR is reviewed. When proposing PRs that have already been
+merged, also add a comment to the PR to ensure that the backporters are
+notified.
 
 Backporting Guide for the Backporter
 ------------------------------------
