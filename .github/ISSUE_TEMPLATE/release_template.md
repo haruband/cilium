@@ -24,6 +24,8 @@ assignees: ''
 - [ ] Push a PR including the changes necessary for the new release:
   - [ ] Pull latest changes from the branch being released
   - [ ] Run `contrib/release/start-release.sh`
+        **Note**: For `RCs` that are not in a stable branch, you need to follow
+                  the RC release guide manually.
   - [ ] Run `Documentation/check-crd-compat-table.sh vX.Y` and if needed, follow the
         instructions.
   - [ ] Commit all changes with title `Prepare for release vX.Y.Z`
@@ -46,7 +48,7 @@ assignees: ''
   - [ ] Create a commit and push as a new PR.
   - [ ] Merge PR
 - [ ] Update helm charts
-  - [ ] Pull latest branch locally
+  - [ ] Pull latest branch locally into the cilium repository.
   - [ ] Create helm charts artifacts in [Cilium charts] repository using
         [cilium helm release tool] for both the `vX.Y.Z` release and `vX.Y`
         branch and push these changes into the helm repository. Make sure the

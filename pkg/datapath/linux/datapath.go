@@ -27,8 +27,8 @@ import (
 type DatapathConfiguration struct {
 	// HostDevice is the name of the device to be used to access the host.
 	HostDevice string
-	// EncryptInterface is the name of the device to be used for direct ruoting encryption
-	EncryptInterface string
+	// EncryptInterfaces is the list of devices used for direct ruoting encryption
+	EncryptInterfaces []string
 }
 
 type linuxDatapath struct {
@@ -38,23 +38,25 @@ type linuxDatapath struct {
 	nodeAddressing datapath.NodeAddressing
 	config         DatapathConfiguration
 	loader         *loader.Loader
+	wgAgent        datapath.WireguardAgent
 }
 
 // NewDatapath creates a new Linux datapath
-func NewDatapath(cfg DatapathConfiguration, ruleManager datapath.IptablesManager) datapath.Datapath {
+func NewDatapath(cfg DatapathConfiguration, ruleManager datapath.IptablesManager, wgAgent datapath.WireguardAgent) datapath.Datapath {
 	dp := &linuxDatapath{
 		ConfigWriter:    &config.HeaderfileWriter{},
 		IptablesManager: ruleManager,
 		nodeAddressing:  NewNodeAddressing(),
 		config:          cfg,
 		loader:          loader.NewLoader(canDisableDwarfRelocations),
+		wgAgent:         wgAgent,
 	}
 
-	dp.node = NewNodeHandler(cfg, dp.nodeAddressing)
+	dp.node = NewNodeHandler(cfg, dp.nodeAddressing, wgAgent)
 
-	if cfg.EncryptInterface != "" {
-		if err := connector.DisableRpFilter(cfg.EncryptInterface); err != nil {
-			log.WithField(logfields.Interface, cfg.EncryptInterface).Warn("Rpfilter could not be disabled, node to node encryption may fail")
+	for _, iface := range cfg.EncryptInterfaces {
+		if err := connector.DisableRpFilter(iface); err != nil {
+			log.WithError(err).WithField(logfields.Interface, iface).Warn("Rpfilter could not be disabled, node to node encryption may fail")
 		}
 	}
 
@@ -74,4 +76,8 @@ func (l *linuxDatapath) LocalNodeAddressing() datapath.NodeAddressing {
 
 func (l *linuxDatapath) Loader() datapath.Loader {
 	return l.loader
+}
+
+func (l *linuxDatapath) WireguardAgent() datapath.WireguardAgent {
+	return l.wgAgent
 }

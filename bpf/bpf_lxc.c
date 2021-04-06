@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Copyright (C) 2016-2020 Authors of Cilium */
+/* Copyright (C) 2016-2021 Authors of Cilium */
 
 #include <bpf/ctx/skb.h>
 #include <bpf/api.h>
@@ -53,6 +53,33 @@ static __always_inline bool redirect_to_proxy(int verdict, __u8 dir)
 }
 #endif
 
+#ifdef ENABLE_CUSTOM_CALLS
+/* Encode return value and identity into cb buffer. This is used before
+ * executing tail calls to custom programs. "ret" is the return value supposed
+ * to be returned to the kernel, needed by the callee to preserve the datapath
+ * logics. The "identity" is the security identity of the local endpoint: the
+ * source of the packet on ingress path, or its destination on the egress path.
+ * We encode it so that custom programs can retrieve it and use it at their
+ * convenience.
+ */
+static __always_inline int
+encode_custom_prog_meta(struct __ctx_buff *ctx, int ret, __u32 identity)
+{
+	__u32 custom_meta = 0;
+
+	/* If we cannot encode return value on 8 bits, return an error so we can
+	 * skip the tail call entirely, as custom program has no way to return
+	 * expected value and datapath logics will break.
+	 */
+	if ((ret & 0xff) != ret)
+		return -1;
+	custom_meta |= (__u32)(ret & 0xff) << 24;
+	custom_meta |= (identity & 0xffffff);
+	ctx_store_meta(ctx, CB_CUSTOM_CALLS, custom_meta);
+	return 0;
+}
+#endif
+
 #ifdef ENABLE_IPV6
 static __always_inline int ipv6_l3_from_lxc(struct __ctx_buff *ctx,
 					    struct ipv6_ct_tuple *tuple,
@@ -75,6 +102,7 @@ static __always_inline int ipv6_l3_from_lxc(struct __ctx_buff *ctx,
 	bool hairpin_flow = false; /* endpoint wants to access itself via service IP */
 	__u8 policy_match_type = POLICY_MATCH_NONE;
 	__u8 audited = 0;
+	bool __maybe_unused dst_remote_ep = false;
 
 	if (unlikely(!is_valid_lxc_src_ip(ip6)))
 		return DROP_INVALID_SIP;
@@ -165,6 +193,12 @@ skip_service_lookup:
 			*dstID = info->sec_label;
 			tunnel_endpoint = info->tunnel_endpoint;
 			encrypt_key = get_min_encrypt_key(info->key);
+#ifdef ENABLE_WIREGUARD
+			if (info->tunnel_endpoint != 0 &&
+			    info->sec_label != HOST_ID &&
+			    info->sec_label != REMOTE_NODE_ID)
+				dst_remote_ep = true;
+#endif /* ENABLE_WIREGUARD */
 		} else {
 			*dstID = WORLD_ID;
 		}
@@ -306,6 +340,17 @@ ct_recreate6:
 		}
 	}
 
+#if defined(ENABLE_HOST_FIREWALL) && !defined(ENABLE_ROUTING)
+	/* If the destination is the local host and per-endpoint routes are
+	 * enabled, jump to the bpf_host program to enforce ingress host policies.
+	 */
+	if (*dstID == HOST_ID) {
+		ctx_store_meta(ctx, CB_FROM_HOST, 0);
+		tail_call_static(ctx, &POLICY_CALL_MAP, HOST_EP_ID);
+		return DROP_MISSED_TAIL_CALL;
+	}
+#endif /* ENABLE_HOST_FIREWALL && !ENABLE_ROUTING */
+
 	/* The packet goes to a peer not managed by this agent instance */
 #ifdef ENCAP_IFINDEX
 	{
@@ -384,8 +429,12 @@ pass_to_stack:
 		set_encrypt_dip(ctx, tunnel_endpoint);
 #endif
 	} else
-#endif
-#endif
+#elif defined(ENABLE_WIREGUARD)
+	if (dst_remote_ep)
+		set_encrypt_mark(ctx);
+	else
+#endif /* ENABLE_IPSEC */
+#endif /* ENCAP_IFINDEX */
 	{
 #ifdef ENABLE_IDENTITY_MARK
 		/* Always encode the source identity when passing to the stack.
@@ -444,10 +493,18 @@ int tail_handle_ipv6(struct __ctx_buff *ctx)
 	__u32 dstID = 0;
 	int ret = handle_ipv6(ctx, &dstID);
 
-	if (IS_ERR(ret)) {
+	if (IS_ERR(ret))
 		return send_drop_notify(ctx, SECLABEL, dstID, 0, ret,
 					CTX_ACT_DROP, METRIC_EGRESS);
+
+#ifdef ENABLE_CUSTOM_CALLS
+	if (!encode_custom_prog_meta(ctx, ret, dstID)) {
+		tail_call_static(ctx, &CUSTOM_CALLS_MAP,
+				 CUSTOM_CALLS_IDX_IPV6_EGRESS);
+		update_metrics(ctx_full_len(ctx), METRIC_EGRESS,
+			       REASON_MISSED_CUSTOM_CALL);
 	}
+#endif
 
 	return ret;
 }
@@ -476,6 +533,7 @@ static __always_inline int handle_ipv4_from_lxc(struct __ctx_buff *ctx,
 	__u8 policy_match_type = POLICY_MATCH_NONE;
 	__u8 audited = 0;
 	bool has_l4_header = false;
+	bool __maybe_unused dst_remote_ep = false;
 
 	if (!revalidate_data(ctx, &data, &data_end, &ip4))
 		return DROP_INVALID;
@@ -557,6 +615,18 @@ skip_service_lookup:
 			*dstID = info->sec_label;
 			tunnel_endpoint = info->tunnel_endpoint;
 			encrypt_key = get_min_encrypt_key(info->key);
+#ifdef ENABLE_WIREGUARD
+			/* If we detect that the dst is a remote endpoint, we
+			 * need to mark the packet. The ip rule which matches
+			 * on the MARK_MAGIC_ENCRYPT mark will steer the packet
+			 * to the Wireguard tunnel. The marking happens lower
+			 * in the code in the same place where we handle IPSec.
+			 */
+			if (info->tunnel_endpoint != 0 &&
+			    info->sec_label != HOST_ID &&
+			    info->sec_label != REMOTE_NODE_ID)
+				dst_remote_ep = true;
+#endif /* ENABLE_WIREGUARD */
 		} else {
 			*dstID = WORLD_ID;
 		}
@@ -704,6 +774,41 @@ ct_recreate4:
 		}
 	}
 
+#if defined(ENABLE_HOST_FIREWALL) && !defined(ENABLE_ROUTING)
+	/* If the destination is the local host and per-endpoint routes are
+	 * enabled, jump to the bpf_host program to enforce ingress host policies.
+	 */
+	if (*dstID == HOST_ID) {
+		ctx_store_meta(ctx, CB_FROM_HOST, 0);
+		tail_call_static(ctx, &POLICY_CALL_MAP, HOST_EP_ID);
+		return DROP_MISSED_TAIL_CALL;
+	}
+#endif /* ENABLE_HOST_FIREWALL && !ENABLE_ROUTING */
+
+#ifdef ENABLE_EGRESS_GATEWAY
+	{
+		struct egress_info *info;
+		struct endpoint_key key = {};
+
+		info = lookup_ip4_egress_endpoint(ip4->saddr, ip4->daddr);
+		if (!info)
+			goto skip_egress_gateway;
+
+		/* Encap and redirect the packet to egress gateway node through a tunnel.
+		 * Even if the tunnel endpoint is on the same host, follow the same data
+		 * path to be consistent. In future, it can be optimized by directly
+		 * direct to external interface.
+		 */
+		ret = encap_and_redirect_lxc(ctx, info->tunnel_endpoint, encrypt_key,
+					     &key, SECLABEL, monitor);
+		if (ret == IPSEC_ENDPOINT)
+			goto encrypt_to_stack;
+		else
+			return ret;
+	}
+skip_egress_gateway:
+#endif
+
 #ifdef ENCAP_IFINDEX
 	{
 		struct endpoint_key key = {};
@@ -712,7 +817,7 @@ ct_recreate4:
 		key.family = ENDPOINT_KEY_IPV4;
 
 		ret = encap_and_redirect_lxc(ctx, tunnel_endpoint, encrypt_key,
-					     &key, SECLABEL, monitor);
+									 &key, SECLABEL, monitor);
 		if (ret == DROP_NO_TUNNEL_ENDPOINT)
 			goto pass_to_stack;
 		/* If not redirected noteably due to IPSEC then pass up to stack
@@ -765,8 +870,12 @@ pass_to_stack:
 		set_encrypt_dip(ctx, tunnel_endpoint);
 #endif
 	} else
-#endif
-#endif
+#elif defined(ENABLE_WIREGUARD)
+	if (dst_remote_ep)
+		set_encrypt_mark(ctx);
+	else /* Wireguard and identity mark are mutually exclusive */
+#endif /* ENABLE_IPSEC */
+#endif /* ENCAP_IFINDEX */
 	{
 #ifdef ENABLE_IDENTITY_MARK
 		/* Always encode the source identity when passing to the stack.
@@ -798,6 +907,15 @@ int tail_handle_ipv4(struct __ctx_buff *ctx)
 	if (IS_ERR(ret))
 		return send_drop_notify(ctx, SECLABEL, dstID, 0, ret,
 					CTX_ACT_DROP, METRIC_EGRESS);
+
+#ifdef ENABLE_CUSTOM_CALLS
+	if (!encode_custom_prog_meta(ctx, ret, dstID)) {
+		tail_call_static(ctx, &CUSTOM_CALLS_MAP,
+				 CUSTOM_CALLS_IDX_IPV4_EGRESS);
+		update_metrics(ctx_full_len(ctx), METRIC_EGRESS,
+			       REASON_MISSED_CUSTOM_CALL);
+	}
+#endif
 
 	return ret;
 }
@@ -1047,6 +1165,7 @@ int tail_ipv6_policy(struct __ctx_buff *ctx)
 	int ret, ifindex = ctx_load_meta(ctx, CB_IFINDEX);
 	__u32 src_label = ctx_load_meta(ctx, CB_SRC_LABEL);
 	bool from_host = ctx_load_meta(ctx, CB_FROM_HOST);
+	bool proxy_redirect __maybe_unused = false;
 	__u16 proxy_port = 0;
 	__u8 reason = 0;
 
@@ -1055,14 +1174,31 @@ int tail_ipv6_policy(struct __ctx_buff *ctx)
 
 	ret = ipv6_policy(ctx, ifindex, src_label, &reason, &tuple,
 			  &proxy_port, from_host);
-	if (ret == POLICY_ACT_PROXY_REDIRECT)
+	if (ret == POLICY_ACT_PROXY_REDIRECT) {
 		ret = ctx_redirect_to_proxy6(ctx, &tuple, proxy_port, from_host);
+		proxy_redirect = true;
+	}
 	if (IS_ERR(ret))
 		return send_drop_notify(ctx, src_label, SECLABEL, LXC_ID,
 					ret, CTX_ACT_DROP, METRIC_INGRESS);
 
 	/* Store meta: essential for proxy ingress, see bpf_host.c */
 	ctx_store_meta(ctx, CB_PROXY_MAGIC, ctx->mark);
+
+#ifdef ENABLE_CUSTOM_CALLS
+	/* Make sure we skip the tail call when the packet is being redirected
+	 * to a L7 proxy, to avoid running the custom program twice on the
+	 * incoming packet (before redirecting, and on the way back from the
+	 * proxy).
+	 */
+	if (!proxy_redirect && !encode_custom_prog_meta(ctx, ret, src_label)) {
+		tail_call_static(ctx, &CUSTOM_CALLS_MAP,
+				 CUSTOM_CALLS_IDX_IPV6_INGRESS);
+		update_metrics(ctx_full_len(ctx), METRIC_INGRESS,
+			       REASON_MISSED_CUSTOM_CALL);
+	}
+#endif
+
 	return ret;
 }
 
@@ -1071,6 +1207,7 @@ declare_tailcall_if(__and(is_defined(ENABLE_IPV4), is_defined(ENABLE_IPV6)),
 int tail_ipv6_to_endpoint(struct __ctx_buff *ctx)
 {
 	__u32 src_identity = ctx_load_meta(ctx, CB_SRC_LABEL);
+	bool proxy_redirect __maybe_unused = false;
 	void *data, *data_end;
 	struct ipv6hdr *ip6;
 	__u16 proxy_port = 0;
@@ -1117,12 +1254,30 @@ int tail_ipv6_to_endpoint(struct __ctx_buff *ctx)
 
 	ret = ipv6_policy(ctx, 0, src_identity, &reason, NULL,
 			  &proxy_port, true);
-	if (ret == POLICY_ACT_PROXY_REDIRECT)
+	if (ret == POLICY_ACT_PROXY_REDIRECT) {
 		ret = ctx_redirect_to_proxy_hairpin(ctx, proxy_port);
+		proxy_redirect = true;
+	}
 out:
 	if (IS_ERR(ret))
 		return send_drop_notify(ctx, src_identity, SECLABEL, LXC_ID,
 					ret, CTX_ACT_DROP, METRIC_INGRESS);
+
+#ifdef ENABLE_CUSTOM_CALLS
+	/* Make sure we skip the tail call when the packet is being redirected
+	 * to a L7 proxy, to avoid running the custom program twice on the
+	 * incoming packet (before redirecting, and on the way back from the
+	 * proxy).
+	 */
+	if (!proxy_redirect &&
+	    !encode_custom_prog_meta(ctx, ret, src_identity)) {
+		tail_call_static(ctx, &CUSTOM_CALLS_MAP,
+				 CUSTOM_CALLS_IDX_IPV6_INGRESS);
+		update_metrics(ctx_full_len(ctx), METRIC_INGRESS,
+			       REASON_MISSED_CUSTOM_CALL);
+	}
+#endif
+
 	return ret;
 }
 #endif /* ENABLE_IPV6 */
@@ -1319,6 +1474,7 @@ int tail_ipv4_policy(struct __ctx_buff *ctx)
 	int ret, ifindex = ctx_load_meta(ctx, CB_IFINDEX);
 	__u32 src_label = ctx_load_meta(ctx, CB_SRC_LABEL);
 	bool from_host = ctx_load_meta(ctx, CB_FROM_HOST);
+	bool proxy_redirect __maybe_unused = false;
 	__u16 proxy_port = 0;
 	__u8 reason = 0;
 
@@ -1327,14 +1483,31 @@ int tail_ipv4_policy(struct __ctx_buff *ctx)
 
 	ret = ipv4_policy(ctx, ifindex, src_label, &reason, &tuple,
 			  &proxy_port, from_host);
-	if (ret == POLICY_ACT_PROXY_REDIRECT)
+	if (ret == POLICY_ACT_PROXY_REDIRECT) {
 		ret = ctx_redirect_to_proxy4(ctx, &tuple, proxy_port, from_host);
+		proxy_redirect = true;
+	}
 	if (IS_ERR(ret))
 		return send_drop_notify(ctx, src_label, SECLABEL, LXC_ID,
 					ret, CTX_ACT_DROP, METRIC_INGRESS);
 
 	/* Store meta: essential for proxy ingress, see bpf_host.c */
 	ctx_store_meta(ctx, CB_PROXY_MAGIC, ctx->mark);
+
+#ifdef ENABLE_CUSTOM_CALLS
+	/* Make sure we skip the tail call when the packet is being redirected
+	 * to a L7 proxy, to avoid running the custom program twice on the
+	 * incoming packet (before redirecting, and on the way back from the
+	 * proxy).
+	 */
+	if (!proxy_redirect && !encode_custom_prog_meta(ctx, ret, src_label)) {
+		tail_call_static(ctx, &CUSTOM_CALLS_MAP,
+				 CUSTOM_CALLS_IDX_IPV4_INGRESS);
+		update_metrics(ctx_full_len(ctx), METRIC_INGRESS,
+			       REASON_MISSED_CUSTOM_CALL);
+	}
+#endif
+
 	return ret;
 }
 
@@ -1343,6 +1516,7 @@ declare_tailcall_if(__and(is_defined(ENABLE_IPV4), is_defined(ENABLE_IPV6)),
 int tail_ipv4_to_endpoint(struct __ctx_buff *ctx)
 {
 	__u32 src_identity = ctx_load_meta(ctx, CB_SRC_LABEL);
+	bool proxy_redirect __maybe_unused = false;
 	void *data, *data_end;
 	struct iphdr *ip4;
 	__u16 proxy_port = 0;
@@ -1388,12 +1562,30 @@ int tail_ipv4_to_endpoint(struct __ctx_buff *ctx)
 
 	ret = ipv4_policy(ctx, 0, src_identity, &reason, NULL,
 			  &proxy_port, true);
-	if (ret == POLICY_ACT_PROXY_REDIRECT)
+	if (ret == POLICY_ACT_PROXY_REDIRECT) {
 		ret = ctx_redirect_to_proxy_hairpin(ctx, proxy_port);
+		proxy_redirect = true;
+	}
 out:
 	if (IS_ERR(ret))
 		return send_drop_notify(ctx, src_identity, SECLABEL, LXC_ID,
 					ret, CTX_ACT_DROP, METRIC_INGRESS);
+
+#ifdef ENABLE_CUSTOM_CALLS
+	/* Make sure we skip the tail call when the packet is being redirected
+	 * to a L7 proxy, to avoid running the custom program twice on the
+	 * incoming packet (before redirecting, and on the way back from the
+	 * proxy).
+	 */
+	if (!proxy_redirect &&
+	    !encode_custom_prog_meta(ctx, ret, src_identity)) {
+		tail_call_static(ctx, &CUSTOM_CALLS_MAP,
+				 CUSTOM_CALLS_IDX_IPV4_INGRESS);
+		update_metrics(ctx_full_len(ctx), METRIC_INGRESS,
+			       REASON_MISSED_CUSTOM_CALL);
+	}
+#endif
+
 	return ret;
 }
 #endif /* ENABLE_IPV4 */
@@ -1524,6 +1716,19 @@ int handle_to_container(struct __ctx_buff *ctx)
 
 	send_trace_notify(ctx, trace, identity, 0, 0,
 			  ctx->ingress_ifindex, 0, TRACE_PAYLOAD_LEN);
+
+#if defined(ENABLE_HOST_FIREWALL) && !defined(ENABLE_ROUTING)
+	/* If the packet comes from the hostns and per-endpoint routes are enabled,
+	 * jump to bpf_host to enforce egress host policies before anything else.
+	 * We will jump back to bpf_lxc once host policies are enforced.
+	 */
+	if (identity == HOST_ID) {
+		ctx_store_meta(ctx, CB_FROM_HOST, 1);
+		ctx_store_meta(ctx, CB_DST_ENDPOINT_ID, LXC_ID);
+		tail_call_static(ctx, &POLICY_CALL_MAP, HOST_EP_ID);
+		return DROP_MISSED_TAIL_CALL;
+	}
+#endif /* ENABLE_HOST_FIREWALL && !ENABLE_ROUTING */
 
 	ctx_store_meta(ctx, CB_SRC_LABEL, identity);
 

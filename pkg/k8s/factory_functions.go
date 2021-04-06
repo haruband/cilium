@@ -1,4 +1,4 @@
-// Copyright 2018-2020 Authors of Cilium
+// Copyright 2018-2021 Authors of Cilium
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,10 +18,11 @@ import (
 	"github.com/cilium/cilium/pkg/comparator"
 	"github.com/cilium/cilium/pkg/datapath"
 	cilium_v2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
+	cilium_v2alpha1 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2alpha1"
 	slim_corev1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/api/core/v1"
+	slim_discover_v1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/api/discovery/v1"
 	slim_discover_v1beta1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/api/discovery/v1beta1"
 	slim_networkingv1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/api/networking/v1"
-	slim_apiextensions_v1beta1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/apis/apiextensions/v1beta1"
 	slim_metav1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/apis/meta/v1"
 	"github.com/cilium/cilium/pkg/k8s/types"
 	"github.com/cilium/cilium/pkg/logging/logfields"
@@ -90,7 +91,7 @@ func ObjToV1Endpoints(obj interface{}) *slim_corev1.Endpoints {
 	return nil
 }
 
-func ObjToV1EndpointSlice(obj interface{}) *slim_discover_v1beta1.EndpointSlice {
+func ObjToV1Beta1EndpointSlice(obj interface{}) *slim_discover_v1beta1.EndpointSlice {
 	ep, ok := obj.(*slim_discover_v1beta1.EndpointSlice)
 	if ok {
 		return ep
@@ -107,6 +108,26 @@ func ObjToV1EndpointSlice(obj interface{}) *slim_discover_v1beta1.EndpointSlice 
 	}
 	log.WithField(logfields.Object, logfields.Repr(obj)).
 		Warn("Ignoring invalid k8s v1beta1 EndpointSlice")
+	return nil
+}
+
+func ObjToV1EndpointSlice(obj interface{}) *slim_discover_v1.EndpointSlice {
+	ep, ok := obj.(*slim_discover_v1.EndpointSlice)
+	if ok {
+		return ep
+	}
+	deletedObj, ok := obj.(cache.DeletedFinalStateUnknown)
+	if ok {
+		// Delete was not observed by the watcher but is
+		// removed from kube-apiserver. This is the last
+		// known state and the object no longer exists.
+		ep, ok := deletedObj.Obj.(*slim_discover_v1.EndpointSlice)
+		if ok {
+			return ep
+		}
+	}
+	log.WithField(logfields.Object, logfields.Repr(obj)).
+		Warn("Ignoring invalid k8s v1 EndpointSlice")
 	return nil
 }
 
@@ -187,26 +208,6 @@ func ObjToV1Namespace(obj interface{}) *slim_corev1.Namespace {
 	}
 	log.WithField(logfields.Object, logfields.Repr(obj)).
 		Warn("Ignoring invalid k8s v1 Namespace")
-	return nil
-}
-
-func ObjToV1beta1CRD(obj interface{}) *slim_apiextensions_v1beta1.CustomResourceDefinition {
-	crd, ok := obj.(*slim_apiextensions_v1beta1.CustomResourceDefinition)
-	if ok {
-		return crd
-	}
-	deletedObj, ok := obj.(cache.DeletedFinalStateUnknown)
-	if ok {
-		// Delete was not observed by the watcher but is
-		// removed from kube-apiserver. This is the last
-		// known state and the object no longer exists.
-		crd, ok := deletedObj.Obj.(*slim_apiextensions_v1beta1.CustomResourceDefinition)
-		if ok {
-			return crd
-		}
-	}
-	log.WithField(logfields.Object, logfields.Repr(obj)).
-		Warn("Ignoring invalid k8s v1beta1 CustomResourceDefinition")
 	return nil
 }
 
@@ -662,6 +663,30 @@ func ConvertToCiliumLocalRedirectPolicy(obj interface{}) interface{} {
 		return cache.DeletedFinalStateUnknown{
 			Key: concreteObj.Key,
 			Obj: ciliumLocalRedirectPolicy,
+		}
+	default:
+		return obj
+	}
+}
+
+// ConvertToCiliumEgressNATPolicy converts a *cilium_v2.CiliumEgressNATPolicy into a
+// *cilium_v2.CiliumEgressNATPolicy or a cache.DeletedFinalStateUnknown into
+// a cache.DeletedFinalStateUnknown with a *cilium_v2.CiliumEgressNATPolicy in its Obj.
+// If the given obj can't be cast into either *cilium_v2.CiliumEgressNATPolicy
+// nor cache.DeletedFinalStateUnknown, the original obj is returned.
+func ConvertToCiliumEgressNATPolicy(obj interface{}) interface{} {
+	// TODO create a slim type of the CiliumEgressNATPolicy
+	switch concreteObj := obj.(type) {
+	case *cilium_v2alpha1.CiliumEgressNATPolicy:
+		return concreteObj
+	case cache.DeletedFinalStateUnknown:
+		ciliumEgressNATPolicy, ok := concreteObj.Obj.(*cilium_v2alpha1.CiliumEgressNATPolicy)
+		if !ok {
+			return obj
+		}
+		return cache.DeletedFinalStateUnknown{
+			Key: concreteObj.Key,
+			Obj: ciliumEgressNATPolicy,
 		}
 	default:
 		return obj

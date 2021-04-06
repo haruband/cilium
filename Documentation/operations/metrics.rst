@@ -207,6 +207,17 @@ Name                                       Labels                               
 ``services_events_total``                                                                     Number of services events labeled by action type
 ========================================== ================================================== ========================================================
 
+Cluster health
+~~~~~~~~~~~~~~
+
+========================================== ================================================== ========================================================
+Name                                       Labels                                             Description
+========================================== ================================================== ========================================================
+``unreachable_nodes``                                                                         Number of nodes that cannot be reached
+``unreachable_health_endpoints``                                                              Number of health endpoints that cannot be reached
+``controllers_failing``                                                                       Number of failing controllers
+========================================== ================================================== ========================================================
+
 Datapath
 ~~~~~~~~
 
@@ -331,6 +342,7 @@ IPAM
 Name                                     Labels                                       Description
 ======================================== ============================================ ========================================================
 ``ipam_events_total``                                                                 Number of IPAM events received labeled by action and datapath family type
+``ip_addresses``                         ``family``                                   Number of allocated IP addresses
 ======================================== ============================================ ========================================================
 
 KVstore

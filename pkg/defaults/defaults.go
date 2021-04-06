@@ -119,6 +119,11 @@ const (
 	// expired DNS lookups with still-active connections
 	ToFQDNsMaxDeferredConnectionDeletes = 10000
 
+	// ToFQDNsIdleConnectionGracePeriod Time during which idle but
+	// previously active connections with expired DNS lookups are
+	// still considered alive
+	ToFQDNsIdleConnectionGracePeriod = 0 * time.Second
+
 	// ToFQDNsPreCache is a path to a file with DNS cache data to insert into the
 	// global cache on startup.
 	// The file is not re-read after agent start.
@@ -324,8 +329,8 @@ const (
 	IPAMPreAllocation = 8
 
 	// ENIFirstInterfaceIndex is the default value for
-	// CiliumNode.Spec.ENI.FirstInterfaceIndex if no value is set
-	ENIFirstInterfaceIndex = 1
+	// CiliumNode.Spec.ENI.FirstInterfaceIndex if no value is set.
+	ENIFirstInterfaceIndex = 0
 
 	// ParallelAllocWorkers is the default max number of parallel workers doing allocation in the operator
 	ParallelAllocWorkers = 50
@@ -408,4 +413,13 @@ const (
 
 	// EnableBPFBypassFIBLookup instructs Cilium to enable the FIB lookup bypass optimization for nodeport reverse NAT handling.
 	EnableBPFBypassFIBLookup = true
+
+	// InstallNoConntrackRules instructs Cilium to install Iptables rules to skip netfilter connection tracking on all pod traffic.
+	InstallNoConntrackIptRules = false
+
+	// WireguardSubnetV4 is a default wireguard tunnel subnet
+	WireguardSubnetV4 = "172.16.43.0/24"
+
+	// WireguardSubnetV6 is a default wireguard tunnel subnet
+	WireguardSubnetV6 = "fdc9:281f:04d7:9ee9::1/64"
 )

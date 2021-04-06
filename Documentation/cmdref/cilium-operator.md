@@ -11,6 +11,7 @@ cilium-operator [flags]
 ### Options
 
 ```
+      --alibaba-cloud-vpc-id string               Specific VPC ID for AlibabaCloud ENI. If not set use same VPC as operator
       --aws-instance-limit-mapping map            Add or overwrite mappings of AWS instance limit in the form of {"AWS instance type": "Maximum Network Interfaces","IPv4 Addresses per Interface","IPv6 Addresses per Interface"}. cli example: --aws-instance-limit-mapping=a1.medium=2,4,4 --aws-instance-limit-mapping=a2.somecustomflavor=4,5,6 configmap example: {"a1.medium": "2,4,4", "a2.somecustomflavor": "4,5,6"} (default map[])
       --aws-release-excess-ips                    Enable releasing excess free IP addresses from AWS ENI.
       --azure-cloud-name string                   Name of the Azure cloud being used (default "AzurePublicCloud")
@@ -37,6 +38,7 @@ cilium-operator [flags]
       --enable-k8s-endpoint-slice                 Enables k8s EndpointSlice feature into Cilium-Operator if the k8s cluster supports it (default true)
       --enable-k8s-event-handover                 Enable k8s event handover to kvstore for improved scalability
       --enable-metrics                            Enable Prometheus metrics
+      --enable-wireguard                          Enable wireguard
       --eni-tags map                              ENI tags in the form of k1=v1 (multiple k/v pairs can be passed by repeating the CLI flag) (default map[])
       --gops-port int                             Port for gops server to listen on (default 9891)
   -h, --help                                      help for cilium-operator
@@ -67,6 +69,7 @@ cilium-operator [flags]
       --operator-prometheus-serve-addr string     Address to serve Prometheus metrics (default ":6942")
       --parallel-alloc-workers int                Maximum number of parallel IPAM workers (default 50)
       --pprof                                     Enable pprof debugging endpoint
+      --pprof-port int                            Port that the pprof listens on (default 6061)
       --subnet-ids-filter strings                 Subnets IDs (separated by commas)
       --subnet-tags-filter stringToString         Subnets tags in the form of k1=v1,k2=v2 (multiple k/v pairs can also be passed by repeating the CLI flag (default [])
       --synchronize-k8s-nodes                     Synchronize Kubernetes nodes to kvstore and perform CNP GC (default true)
@@ -74,6 +77,8 @@ cilium-operator [flags]
       --unmanaged-pod-watcher-interval int        Interval to check for unmanaged kube-dns pods (0 to disable) (default 15)
       --update-ec2-adapter-limit-via-api          Use the EC2 API to update the instance type to adapter limits
       --version                                   Print version information
+      --wireguard-subnet-v4 string                Wireguard tunnel IPv4 subnet (default "172.16.43.0/24")
+      --wireguard-subnet-v6 string                Wireguard tunnel IPv6 subnet (default "fdc9:281f:04d7:9ee9::1/64")
 ```
 
 ### SEE ALSO

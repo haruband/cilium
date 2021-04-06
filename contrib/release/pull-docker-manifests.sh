@@ -4,17 +4,18 @@
 
 DIR=$(dirname $(readlink -ne $BASH_SOURCE))
 source "${DIR}/lib/common.sh"
+source "${DIR}/../backporting/common.sh"
 
 CONTAINER_ENGINE=${CONTAINER_ENGINE:-docker}
 
 repo="cilium/cilium"
 
 usage() {
-    logecho "usage: $0 <GH-USERNAME> <VERSION> <RUN-URL>"
-    logecho "GH-USERNAME  GitHub username"
-    logecho "VERSION      Target version"
+    logecho "usage: $0 <RUN-URL> [VERSION] [GH-USERNAME]"
     logecho "RUN-URL      GitHub URL with the RUN for the release images"
     logecho "             example: https://github.com/cilium/cilium/actions/runs/600920964"
+    logecho "VERSION      Target version (X.Y.Z) (default: read from VERSION file)"
+    logecho "GH-USERNAME  GitHub username for authentication (default: autodetect)"
     logecho "GITHUB_TOKEN environment variable set with the scope public:repo"
     logecho
     logecho "--help     Print this help message"
@@ -63,23 +64,29 @@ get_digest_output() {
 
 main() {
     handle_args "$@"
-    local username version run_url_id
-    username="${1}"
-    version="${2}"
-    run_url_id="$(basename "${3}")"
+    local username ersion version run_url_id
+    run_url_id="$(basename "${1}")"
+    ersion="$(echo ${2:-$(cat VERSION)} | sed 's/^v//')"
+    version="v${ersion}"
+    username=$(get_user_remote ${3:-})
+
+    if [ ! -e "${PWD}/install/kubernetes/Makefile.digests" ]; then
+        >&2 echo "Cannot find install/kubernetes/Makefile.digests"
+        >&2 echo "Are you in the Cilium root directory?"
+        return 1
+    fi
 
     makefile_digest=$(get_digest_output "${username}" "${run_url_id}" "${version}" Makefile.digests)
     >&2 echo "Adding image SHAs to install/kubernetes/Makefile.digests"
     >&2 echo ""
-    cp "${makefile_digest}" "${DIR}/../../install/kubernetes/Makefile.digests"
+    cp "${makefile_digest}" "${PWD}/install/kubernetes/Makefile.digests"
+    make -C install/kubernetes/
 
     >&2 echo "Generating manifest text for release notes"
     >&2 echo ""
-    echo "Docker Manifests" > "${DIR}/../../digest-${version}.txt"
-    echo "----------------" >> "${DIR}/../../digest-${version}.txt"
     image_digest_output=$(get_digest_output "${username}" "${run_url_id}" "${version}" image-digest-output.txt)
-    cat "${image_digest_output}" >> "${DIR}/../../digest-${version}.txt"
-    >&2 echo "Image digests available at ${DIR}/../../digest-${version}.txt"
+    cat "${image_digest_output}" >> "${PWD}/digest-${version}.txt"
+    >&2 echo "Image digests available at ${PWD}/digest-${version}.txt"
 }
 
 main "$@"

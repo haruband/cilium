@@ -1,4 +1,4 @@
-// Copyright 2019-2020 Authors of Cilium
+// Copyright 2019-2021 Authors of Cilium
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -53,6 +53,7 @@ import (
 	"github.com/cilium/cilium/pkg/maps/nat"
 	"github.com/cilium/cilium/pkg/maps/neighborsmap"
 	"github.com/cilium/cilium/pkg/maps/policymap"
+	"github.com/cilium/cilium/pkg/maps/recorder"
 	"github.com/cilium/cilium/pkg/maps/signalmap"
 	"github.com/cilium/cilium/pkg/maps/sockmap"
 	"github.com/cilium/cilium/pkg/maps/tunnel"
@@ -148,6 +149,7 @@ func (h *HeaderfileWriter) WriteNodeConfig(w io.Writer, cfg *datapath.LocalNodeC
 	cDefinesMap["IPCACHE_MAP"] = ipcachemap.Name
 	cDefinesMap["IPCACHE_MAP_SIZE"] = fmt.Sprintf("%d", ipcachemap.MaxEntries)
 	// TODO(anfernee): Update Documentation/concepts/ebpf/maps.rst when egress gateway support is merged.
+	cDefinesMap["EGRESS_MAP"] = egressmap.MapName
 	cDefinesMap["EGRESS_MAP_SIZE"] = fmt.Sprintf("%d", egressmap.MaxEntries)
 	cDefinesMap["POLICY_PROG_MAP_SIZE"] = fmt.Sprintf("%d", policymap.PolicyCallMaxEntries)
 	cDefinesMap["SOCKOPS_MAP_SIZE"] = fmt.Sprintf("%d", sockmap.MaxEntries)
@@ -214,6 +216,10 @@ func (h *HeaderfileWriter) WriteNodeConfig(w io.Writer, cfg *datapath.LocalNodeC
 		cDefinesMap["ENABLE_IPSEC"] = "1"
 	}
 
+	if option.Config.EnableWireguard {
+		cDefinesMap["ENABLE_WIREGUARD"] = "1"
+	}
+
 	if option.Config.InstallIptRules || iptables.KernelHasNetfilter() {
 		cDefinesMap["NO_REDIRECT"] = "1"
 	}
@@ -228,6 +234,10 @@ func (h *HeaderfileWriter) WriteNodeConfig(w io.Writer, cfg *datapath.LocalNodeC
 
 	if option.Config.DevicePreFilter != "undefined" {
 		cDefinesMap["ENABLE_PREFILTER"] = "1"
+	}
+
+	if option.Config.EnableEgressGateway {
+		cDefinesMap["ENABLE_EGRESS_GATEWAY"] = "1"
 	}
 
 	if option.Config.EnableHostReachableServices {
@@ -248,6 +258,17 @@ func (h *HeaderfileWriter) WriteNodeConfig(w io.Writer, cfg *datapath.LocalNodeC
 	if option.Config.EnableNodePort {
 		if option.Config.EnableHealthDatapath {
 			cDefinesMap["ENABLE_HEALTH_CHECK"] = "1"
+		}
+		if option.Config.EnableRecorder {
+			cDefinesMap["ENABLE_CAPTURE"] = "1"
+			if option.Config.EnableIPv4 {
+				cDefinesMap["CAPTURE4_RULES"] = recorder.MapNameWcard4
+				cDefinesMap["CAPTURE4_SIZE"] = fmt.Sprintf("%d", recorder.MapSize)
+			}
+			if option.Config.EnableIPv6 {
+				cDefinesMap["CAPTURE6_RULES"] = recorder.MapNameWcard6
+				cDefinesMap["CAPTURE6_SIZE"] = fmt.Sprintf("%d", recorder.MapSize)
+			}
 		}
 		cDefinesMap["ENABLE_NODEPORT"] = "1"
 		cDefinesMap["ENABLE_LOADBALANCER"] = "1"
@@ -419,8 +440,13 @@ func (h *HeaderfileWriter) WriteNodeConfig(w io.Writer, cfg *datapath.LocalNodeC
 		cDefinesMap["ENABLE_HOST_FIREWALL"] = "1"
 	}
 
-	if iface := option.Config.EncryptInterface; iface != "" {
-		link, err := netlink.LinkByName(iface)
+	if iface := option.Config.EncryptInterface; len(iface) != 0 {
+		// When FIB lookup is not supported (older kernels)  we need to
+		// pick an interface so pick first interface in list. Then we pick
+		// an IPv4 address to use by selecting link IPAddr. In case with
+		// kernel support, the kernel datapath will use the FIB lookup helper
+		// and this define is ignored.
+		link, err := netlink.LinkByName(iface[0])
 		if err == nil {
 			cDefinesMap["ENCRYPT_IFACE"] = fmt.Sprintf("%d", link.Attrs().Index)
 
@@ -477,6 +503,10 @@ func (h *HeaderfileWriter) WriteNodeConfig(w io.Writer, cfg *datapath.LocalNodeC
 
 	if option.Config.EnableIdentityMark {
 		cDefinesMap["ENABLE_IDENTITY_MARK"] = "1"
+	}
+
+	if option.Config.EnableCustomCalls {
+		cDefinesMap["ENABLE_CUSTOM_CALLS"] = "1"
 	}
 
 	// Since golang maps are unordered, we sort the keys in the map
@@ -622,7 +652,6 @@ func (h *HeaderfileWriter) writeStaticData(fw io.Writer, e datapath.EndpointConf
 		}
 		// Dummy value to avoid being optimized when 0
 		fmt.Fprint(fw, defineUint32("SECCTX_FROM_IPCACHE", 1))
-		fmt.Fprint(fw, defineUint32("HOST_EP_ID", uint32(e.GetID())))
 
 		// Use templating for ETH_HLEN only if there is any L2-less device
 		if !mac.HaveMACAddr(option.Config.Devices) {
@@ -653,6 +682,8 @@ func (h *HeaderfileWriter) writeStaticData(fw io.Writer, e datapath.EndpointConf
 		fmt.Fprint(fw, defineUint32("LXC_ID", uint32(e.GetID())))
 	}
 
+	fmt.Fprint(fw, defineUint32("HOST_EP_ID", uint32(node.GetEndpointID())))
+
 	fmt.Fprint(fw, defineMAC("NODE_MAC", e.GetNodeMAC()))
 
 	secID := e.GetIdentityLocked().Uint32()
@@ -667,6 +698,9 @@ func (h *HeaderfileWriter) writeStaticData(fw io.Writer, e datapath.EndpointConf
 		callsMapName = callsmap.HostMapName
 	}
 	fmt.Fprintf(fw, "#define CALLS_MAP %s\n", bpf.LocalMapName(callsMapName, epID))
+	if option.Config.EnableCustomCalls && !e.IsHost() {
+		fmt.Fprintf(fw, "#define CUSTOM_CALLS_MAP %s\n", bpf.LocalMapName(callsmap.CustomCallsMapName, epID))
+	}
 }
 
 // WriteEndpointConfig writes the BPF configuration for the endpoint to a writer.

@@ -13,11 +13,13 @@
 #include "lb.h"
 #include "common.h"
 #include "overloadable.h"
+#include "eps.h"
 #include "conntrack.h"
 #include "csum.h"
 #include "encap.h"
 #include "trace.h"
 #include "ghash.h"
+#include "pcap.h"
 #include "host_firewall.h"
 
 #define CB_SRC_IDENTITY	0
@@ -598,6 +600,7 @@ int tail_nodeport_ipv6_dsr(struct __ctx_buff *ctx)
 	}
 
 out_send:
+	cilium_capture_out(ctx);
 	return ctx_redirect(ctx, fib_params.l.ifindex, 0);
 drop_err:
 	return send_drop_notify_error(ctx, 0, ret, CTX_ACT_DROP, METRIC_EGRESS);
@@ -764,6 +767,8 @@ static __always_inline int nodeport_lb6(struct __ctx_buff *ctx,
 	bool backend_local;
 	__u32 monitor = 0;
 
+	cilium_capture_in(ctx);
+
 	if (!revalidate_data(ctx, &data, &data_end, &ip6))
 		return DROP_INVALID;
 
@@ -883,6 +888,9 @@ redo_local:
 	}
 
 	if (!backend_local) {
+#ifdef ENABLE_WIREGUARD
+		set_encrypt_mark(ctx);
+#endif /* ENABLE_WIREGUARD */
 		edt_set_aggregate(ctx, 0);
 		if (nodeport_uses_dsr6(&tuple)) {
 #if DSR_ENCAP_MODE == DSR_ENCAP_IPIP
@@ -1089,6 +1097,25 @@ static __always_inline bool snat_v4_needed(struct __ctx_buff *ctx, __be32 *addr,
 
 	if (!revalidate_data(ctx, &data, &data_end, &ip4))
 		return false;
+
+#if defined(ENABLE_EGRESS_GATEWAY)
+	/* Check if SNAT needs to be applied to the packet. Apply SNAT if there
+	 * is an egress rule in ebpf map, and the packet is not coming out from
+	 * overlay interface. If the packet is coming from an overlay interface
+	 * it means it is forwarded to another node, instead of leaving the
+	 * cluster.
+	 */
+	if (1) {
+		struct egress_info *info;
+
+		info = lookup_ip4_egress_endpoint(ip4->saddr, ip4->daddr);
+		if (info && ctx->ifindex != ENCAP_IFINDEX) {
+			*addr = info->egress_ip;
+			*from_endpoint = true;
+			return true;
+		}
+	}
+#endif
 
 	/* Basic minimum is to only NAT when there is a potential of
 	 * overlapping tuples, e.g. applications in hostns reusing
@@ -1556,6 +1583,7 @@ int tail_nodeport_ipv4_dsr(struct __ctx_buff *ctx)
 	}
 
 out_send:
+	cilium_capture_out(ctx);
 	return ctx_redirect(ctx, fib_params.l.ifindex, 0);
 drop_err:
 	return send_drop_notify_error(ctx, 0, ret, CTX_ACT_DROP, METRIC_EGRESS);
@@ -1724,6 +1752,8 @@ static __always_inline int nodeport_lb4(struct __ctx_buff *ctx,
 	bool backend_local;
 	__u32 monitor = 0;
 
+	cilium_capture_in(ctx);
+
 	if (!revalidate_data(ctx, &data, &data_end, &ip4))
 		return DROP_INVALID;
 
@@ -1855,6 +1885,12 @@ redo_local:
 	}
 
 	if (!backend_local) {
+#ifdef ENABLE_WIREGUARD
+		/* The request which is to be forwarded needs to go over the
+		 * Wireguard tunnel.
+		 */
+		set_encrypt_mark(ctx);
+#endif /* ENABLE_WIREGUARD */
 		edt_set_aggregate(ctx, 0);
 		if (nodeport_uses_dsr4(&tuple)) {
 #if DSR_ENCAP_MODE == DSR_ENCAP_IPIP
@@ -2023,10 +2059,11 @@ int tail_rev_nodeport_lb4(struct __ctx_buff *ctx)
 	return ctx_redirect(ctx, ifindex, 0);
 }
 
-declare_tailcall_if(__or(__and(is_defined(ENABLE_IPV4),
-			       is_defined(ENABLE_IPV6)),
-			 __and(is_defined(ENABLE_HOST_FIREWALL),
-			       is_defined(IS_BPF_HOST))),
+declare_tailcall_if(__or3(__and(is_defined(ENABLE_IPV4),
+				is_defined(ENABLE_IPV6)),
+			  __and(is_defined(ENABLE_HOST_FIREWALL),
+				is_defined(IS_BPF_HOST)),
+			  is_defined(ENABLE_EGRESS_GATEWAY)),
 		    CILIUM_CALL_IPV4_ENCAP_NODEPORT_NAT)
 int tail_handle_nat_fwd_ipv4(struct __ctx_buff *ctx)
 {
@@ -2126,7 +2163,7 @@ lb_handle_health(struct __ctx_buff *ctx __maybe_unused)
 }
 #endif /* ENABLE_HEALTH_CHECK */
 
-static __always_inline int nodeport_nat_fwd(struct __ctx_buff *ctx)
+static __always_inline int handle_nat_fwd(struct __ctx_buff *ctx)
 {
 	int ret = CTX_ACT_OK;
 	__u16 proto;
@@ -2136,10 +2173,11 @@ static __always_inline int nodeport_nat_fwd(struct __ctx_buff *ctx)
 	switch (proto) {
 #ifdef ENABLE_IPV4
 	case bpf_htons(ETH_P_IP):
-		invoke_tailcall_if(__or(__and(is_defined(ENABLE_IPV4),
-					      is_defined(ENABLE_IPV6)),
-					__and(is_defined(ENABLE_HOST_FIREWALL),
-					      is_defined(IS_BPF_HOST))),
+		invoke_tailcall_if(__or3(__and(is_defined(ENABLE_IPV4),
+					       is_defined(ENABLE_IPV6)),
+					 __and(is_defined(ENABLE_HOST_FIREWALL),
+					       is_defined(IS_BPF_HOST)),
+					 is_defined(ENABLE_EGRESS_GATEWAY)),
 				   CILIUM_CALL_IPV4_ENCAP_NODEPORT_NAT,
 				   tail_handle_nat_fwd_ipv4);
 		break;

@@ -130,14 +130,12 @@ contain any characters after it.
 
 The Kubernetes tests support the following Kubernetes versions:
 
-* 1.13
-* 1.14
-* 1.15
 * 1.16
 * 1.17
 * 1.18
 * 1.19
 * 1.20
+* 1.21
 
 By default, the Vagrant VMs are provisioned with Kubernetes 1.20. To run with any other
 supported version of Kubernetes, run the test suite with the following format:
@@ -517,8 +515,8 @@ cluster.
 
   CNI_INTEGRATION=gke K8S_VERSION=1.17 ginkgo --focus="K8sDemo" -- -cilium.provision=false -cilium.kubeconfig=`echo ~/.kube/config` -cilium.image="quay.io/cilium/cilium-ci" -cilium.operator-image="quay.io/cilium/operator" -cilium.operator-suffix="-ci" -cilium.hubble-relay-image="quay.io/cilium/hubble-relay-ci" -cilium.passCLIEnvironment=true
 
-.. note:: The kubernetes version defaults to 1.18 but can be configured with
-          versions between 1.13 and 1.18. Version should match the server
+.. note:: The kubernetes version defaults to 1.21 but can be configured with
+          versions between 1.16 and 1.21. Version should match the server
           version reported by ``kubectl version``.
 
 AWS EKS (experimental)
@@ -623,6 +621,8 @@ configuration options that can be passed as environment variables:
 | CONTAINER\_RUNTIME   | docker            | containerd   | To set the default container runtime in the Kubernetes cluster   |
 +----------------------+-------------------+--------------+------------------------------------------------------------------+
 | K8S\_VERSION         | 1.18              | 1.\*\*       | Kubernetes version to install                                    |
++----------------------+-------------------+--------------+------------------------------------------------------------------+
+| KUBEPROXY            | 1                 | 0-1          | If 0 the Kubernetes' kube-proxy won't be installed               |
 +----------------------+-------------------+--------------+------------------------------------------------------------------+
 | SERVER\_BOX          | cilium/ubuntu-dev | *            | Vagrantcloud base image                                          |
 +----------------------+-------------------+--------------+------------------------------------------------------------------+

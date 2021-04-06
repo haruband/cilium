@@ -315,7 +315,7 @@ Annotations:
 1.10 Upgrade Notes
 ------------------
 
-* Cilium has bumped the minimal Kubernetes version supported to v1.13.0.
+* Cilium has bumped the minimal Kubernetes version supported to v1.16.0.
 * When using the ENI-based IPAM in conjunction with the ``--eni-tags``, failures
   to create tags are treated as errors which will result in ENIs not being
   created. Ensure that the ``ec2:CreateTags`` IAM permissions are granted.
@@ -330,6 +330,13 @@ Annotations:
   See https://github.com/cilium/cilium/pull/14192 for context and related issues.
 * Helm option ``serviceAccounts.certgen`` is removed, please use ``serviceAccounts.clustermeshcertgen``
   for Clustermesh certificate generation and ``serviceAccounts.hubblecertgen`` for Hubble certificate generation.
+* For AWS ENI IPAM mode, Cilium has changed the ``first-interface-index``
+  default from ``1`` to ``0``. This means that pods will start using IPs of
+  ``eth0`` instead of ``eth1``. This allows using the maximum number of IPs
+  available on an instance by default. Be aware: Depending on your security
+  groups configuration of the ``eth0`` interface, pods may be associated with a
+  different security group all of a sudden. In order to stay with Cilium's
+  current behavior, set the value to ``1`` in the ``CiliumNode`` resource.
 
 Removed Metrics/Labels
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -366,6 +373,12 @@ New Options
   and has the same desired effect as ``masquerade`` option.
 * ``cni.exclusive``: Use to toggle Cilium installing itself as the only available CNI
   plugin on all nodes.
+* ``install-no-conntrack-iptables-rules``: This option, by default set to false,
+  installs some extra Iptables rules to skip netfilter connection tracking on all
+  pod traffic. Disabling connection tracking is only possible when Cilium is
+  running in direct routing mode and is using the kube-proxy replacement.
+  Moreover, this option cannot be enabled when Cilium is running in a managed
+  Kubernetes environment or in a chained CNI setup.
 
 Removed Options
 ~~~~~~~~~~~~~~~
@@ -383,6 +396,9 @@ Removed Options
 Deprecated Options
 ~~~~~~~~~~~~~~~~~~
 
+* ``etcd.managed``: The managed etcd mode is being deprecated. The option and
+  all relevant code will be removed in 1.11. If you are using managed etcd, you
+  will need to run & deploy the etcd-operator yourself.
 * ``bpf-compile-debug``: This option does not have any effect since 1.10
   and is planned to be removed in 1.11.
 * ``k8s-force-json-patch``: This option does not have any effect for

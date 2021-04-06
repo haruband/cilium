@@ -438,7 +438,7 @@ func getK8sSupportedConstraints(ciliumVersion string) (semver.Range, error) {
 	case IsCiliumV1_9(cst):
 		return versioncheck.MustCompile(">=1.12.0 <1.20.0"), nil
 	case IsCiliumV1_10(cst):
-		return versioncheck.MustCompile(">=1.13.0 <1.21.0"), nil
+		return versioncheck.MustCompile(">=1.16.0 <1.22.0"), nil
 	default:
 		return nil, fmt.Errorf("unrecognized version '%s'", ciliumVersion)
 	}
@@ -496,7 +496,11 @@ func failIfContainsBadLogMsg(logs, label string, blacklist map[string][]string) 
 // or bpf-next.git tree).
 func RunsOnNetNextKernel() bool {
 	netNext := os.Getenv("NETNEXT")
-	return netNext == "true" || netNext == "1"
+	if netNext == "true" || netNext == "1" {
+		return true
+	}
+	netNext = os.Getenv("KERNEL")
+	return netNext == "net-next"
 }
 
 // DoesNotRunOnNetNextKernel is the complement function of RunsOnNetNextKernel.

@@ -81,6 +81,8 @@ const (
 
 	LogGathererSelector = "k8s-app=cilium-test-logs"
 	CiliumSelector      = "k8s-app=cilium"
+
+	NativeRoutingCIDR = "10.0.0.0/8"
 )
 
 var (
@@ -117,7 +119,7 @@ var (
 
 		// We need CNP node status to know when a policy is being enforced
 		"enableCnpStatusUpdates": "true",
-		"nativeRoutingCIDR":      "10.0.0.0/8",
+		"nativeRoutingCIDR":      NativeRoutingCIDR,
 
 		"ipam.operator.clusterPoolIPv6PodCIDR": "fd02::/112",
 	}
@@ -635,9 +637,19 @@ func (kub *Kubectl) labelNodes() error {
 		return fmt.Errorf("unable to unmarshal string slice '%#v': %s", nodesList, err)
 	}
 
-	index := 1
+	var (
+		index int = 1
+
+		noCiliumNode     = GetNodeWithoutCilium()
+		noCiliumNodeName string
+	)
 	for _, nodeName := range nodesList {
-		cmd := fmt.Sprintf("%s label --overwrite node %s cilium.io/ci-node=k8s%d", KubectlCmd, nodeName, index)
+		ciNodeName := fmt.Sprintf("k8s%d", index)
+		if GetNodeWithoutCilium() == ciNodeName {
+			noCiliumNodeName = nodeName
+		}
+
+		cmd := fmt.Sprintf("%s label --overwrite node %s cilium.io/ci-node=%s", KubectlCmd, nodeName, ciNodeName)
 		res := kub.ExecShort(cmd)
 		if !res.WasSuccessful() {
 			return fmt.Errorf("unable to label node with '%s': %s", cmd, res.OutputPrettyPrint())
@@ -645,11 +657,10 @@ func (kub *Kubectl) labelNodes() error {
 		index++
 	}
 
-	node := GetNodeWithoutCilium()
-	if node != "" {
+	if noCiliumNode != "" {
 		// Prevent scheduling any pods on the node, as it will be used as an external client
 		// to send requests to k8s{1,2}
-		cmd := fmt.Sprintf("%s taint --overwrite nodes %s key=value:NoSchedule", KubectlCmd, node)
+		cmd := fmt.Sprintf("%s taint --overwrite nodes %s key=value:NoSchedule", KubectlCmd, noCiliumNodeName)
 		res := kub.ExecMiddle(cmd)
 		if !res.WasSuccessful() {
 			return fmt.Errorf("unable to taint node with '%s': %s", cmd, res.OutputPrettyPrint())
@@ -3463,6 +3474,23 @@ func (kub *Kubectl) ExecInHostNetNS(ctx context.Context, node, cmd string) *CmdR
 		logGathererSelector(true), node)
 
 	return kub.ExecInFirstPod(ctx, LogGathererNamespace, selector, cmd)
+}
+
+// ExecInHostNetNSInBackground runs given command in a pod running in a host network namespace
+// but in background.
+func (kub *Kubectl) ExecInHostNetNSInBackground(ctx context.Context, node, cmd string) (*CmdRes, func(), error) {
+	selector := fmt.Sprintf("%s --field-selector spec.nodeName=%s",
+		logGathererSelector(true), node)
+	names, err := kub.GetPodNamesContext(ctx, LogGathererNamespace, selector)
+	if err != nil {
+		return nil, nil, err
+	}
+	pod := names[0]
+
+	bgCmd := fmt.Sprintf("%s exec -n %s %s -- %s", KubectlCmd, LogGathererNamespace, pod, cmd)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	return kub.ExecInBackground(ctx, bgCmd, ExecOptions{SkipLog: true}), cancel, nil
 }
 
 // ExecInHostNetNSByLabel runs given command in a pod running in a host network namespace.

@@ -1,4 +1,4 @@
-// Copyright 2016-2020 Authors of Cilium
+// Copyright 2016-2021 Authors of Cilium
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -303,6 +303,9 @@ const (
 	// EnableBandwidthManager enables EDT-based pacing
 	EnableBandwidthManager = "enable-bandwidth-manager"
 
+	// EnableRecorder enables the datapath pcap recorder
+	EnableRecorder = "enable-recorder"
+
 	// EnableLocalRedirectPolicy enables support for local redirect policy
 	EnableLocalRedirectPolicy = "enable-local-redirect-policy"
 
@@ -348,6 +351,10 @@ const (
 	// InstallIptRules sets whether Cilium should install any iptables in general
 	InstallIptRules = "install-iptables-rules"
 
+	// InstallNoConntrackIptRules instructs Cilium to install Iptables rules
+	// to skip netfilter connection tracking on all pod traffic.
+	InstallNoConntrackIptRules = "install-no-conntrack-iptables-rules"
+
 	IPTablesLockTimeout = "iptables-lock-timeout"
 
 	// IPTablesRandomFully sets iptables flag random-fully on masquerading rules
@@ -390,6 +397,9 @@ const (
 	// PProf enables serving the pprof debugging API
 	PProf = "pprof"
 
+	// PProfPort is the port that the pprof listens on
+	PProfPort = "pprof-port"
+
 	// PrefilterDevice is the device facing external network for XDP prefiltering
 	PrefilterDevice = "prefilter-device"
 
@@ -419,6 +429,10 @@ const (
 	// ToFQDNsMaxDeferredConnectionDeletes defines the maximum number of IPs to
 	// retain for expired DNS lookups with still-active connections"
 	ToFQDNsMaxDeferredConnectionDeletes = "tofqdns-max-deferred-connection-deletes"
+
+	// ToFQDNsIdleConnectionGracePeriod defines the connection idle time during which
+	// previously active connections with expired DNS lookups are still considered alive
+	ToFQDNsIdleConnectionGracePeriod = "tofqdns-idle-connection-grace-period"
 
 	// ToFQDNsPreCache is a path to a file with DNS cache data to insert into the
 	// global cache on startup.
@@ -647,6 +661,15 @@ const (
 
 	// IPSecKeyFileName is the name of the option for ipsec key file
 	IPSecKeyFileName = "ipsec-key-file"
+
+	// EnableWireguard is the name of the option to enable wireguard
+	EnableWireguard = "enable-wireguard"
+
+	// WireguardSubnetV4 is the name of the option to set the wireguard v4 subnet
+	WireguardSubnetV4 = "wireguard-subnet-v4"
+
+	// WireguardSubnetV6 is the name of the option to set the wireguard v6 subnet
+	WireguardSubnetV6 = "wireguard-subnet-v6"
 
 	// KVstoreLeaseTTL is the time-to-live for lease in kvstore.
 	KVstoreLeaseTTL = "kvstore-lease-ttl"
@@ -904,6 +927,10 @@ const (
 
 	// EnableBPFBypassFIBLookup instructs Cilium to enable the FIB lookup bypass optimization for nodeport reverse NAT handling.
 	EnableBPFBypassFIBLookup = "bpf-lb-bypass-fib-lookup"
+
+	// EnableCustomCallsName is the name of the option to enable tail calls
+	// for user-defined custom eBPF programs.
+	EnableCustomCallsName = "enable-custom-calls"
 )
 
 // HelpFlagSections to format the Cilium Agent help template.
@@ -935,6 +962,7 @@ var HelpFlagSections = []FlagsSection{
 			EnableIdentityMark,
 			EnableBPFBypassFIBLookup,
 			LBMapEntriesName,
+			EnableCustomCallsName,
 		},
 	},
 	{
@@ -949,6 +977,7 @@ var HelpFlagSections = []FlagsSection{
 			FQDNProxyResponseMaxDelay,
 			ToFQDNsEnableDNSCompression,
 			ToFQDNsMaxDeferredConnectionDeletes,
+			ToFQDNsIdleConnectionGracePeriod,
 		},
 	},
 	{
@@ -1027,6 +1056,7 @@ var HelpFlagSections = []FlagsSection{
 			EnableHealthChecking,
 			TracePayloadlen,
 			PProf,
+			PProfPort,
 		},
 	},
 	{
@@ -1153,6 +1183,9 @@ var HelpFlagSections = []FlagsSection{
 			PrefilterMode,
 			EnableXTSocketFallbackName,
 			IpvlanMasterDevice,
+			EnableWireguard,
+			WireguardSubnetV4,
+			WireguardSubnetV6,
 		},
 	},
 	{
@@ -1386,7 +1419,7 @@ type DaemonConfig struct {
 	XDPMode             string     // XDP mode, values: { xdpdrv | xdpgeneric | none }
 	HostV4Addr          net.IP     // Host v4 address of the snooping device
 	HostV6Addr          net.IP     // Host v6 address of the snooping device
-	EncryptInterface    string     // Set with name of network facing interface to encrypt
+	EncryptInterface    []string   // Set of network facing interface to encrypt over
 	EncryptNode         bool       // Set to true for encrypting node IP traffic
 
 	Ipvlan IpvlanConfig // Ipvlan related configuration
@@ -1606,6 +1639,15 @@ type DaemonConfig struct {
 	// IPSec key file for stored keys
 	IPSecKeyFile string
 
+	// EnableWireguard enables Wireguard encryption
+	EnableWireguard bool
+
+	// WireguardSubnetV4 is a subnet used to allocate Wireguard tunnel IPv4 addrs
+	WireguardSubnetV4 *net.IPNet
+
+	// WireguardSubnetV6 is a subnet used to allocate Wireguard tunnel IPv6 addrs
+	WireguardSubnetV6 *net.IPNet
+
 	// MonitorQueueSize is the size of the monitor event queue
 	MonitorQueueSize int
 
@@ -1668,6 +1710,7 @@ type DaemonConfig struct {
 	TracePayloadlen        int
 	Version                string
 	PProf                  bool
+	PProfPort              int
 	PrometheusServeAddr    string
 	ToFQDNsMinTTL          int
 
@@ -1688,6 +1731,11 @@ type DaemonConfig struct {
 	// ToFQDNsMaxIPsPerHost defines the maximum number of IPs to retain for
 	// expired DNS lookups with still-active connections
 	ToFQDNsMaxDeferredConnectionDeletes int
+
+	// ToFQDNsIdleConnectionGracePeriod Time during which idle but
+	// previously active connections with expired DNS lookups are
+	// still considered alive
+	ToFQDNsIdleConnectionGracePeriod time.Duration
 
 	// FQDNRejectResponse is the dns-proxy response for invalid dns-proxy request
 	FQDNRejectResponse string
@@ -1907,6 +1955,9 @@ type DaemonConfig struct {
 	// EnableBandwidthManager enables EDT-based pacing
 	EnableBandwidthManager bool
 
+	// EnableRecorder enables the datapath pcap recorder
+	EnableRecorder bool
+
 	// KubeProxyReplacementHealthzBindAddr is the KubeProxyReplacement healthz server bind addr
 	KubeProxyReplacementHealthzBindAddr string
 
@@ -2117,6 +2168,14 @@ type DaemonConfig struct {
 
 	// EnableBPFBypassFIBLookup instructs Cilium to enable the FIB lookup bypass optimization for nodeport reverse NAT handling.
 	EnableBPFBypassFIBLookup bool
+
+	// InstallNoConntrackIptRules instructs Cilium to install Iptables rules to skip netfilter connection tracking on all pod traffic.
+	InstallNoConntrackIptRules bool
+
+	// EnableCustomCalls enables tail call hooks for user-defined custom
+	// eBPF programs, typically used to collect custom per-endpoint
+	// metrics.
+	EnableCustomCalls bool
 }
 
 var (
@@ -2533,6 +2592,7 @@ func (c *DaemonConfig) Populate() {
 	c.EnableIPv6NDP = viper.GetBool(EnableIPv6NDPName)
 	c.IPv6MCastDevice = viper.GetString(IPv6MCastDevice)
 	c.EnableIPSec = viper.GetBool(EnableIPSecName)
+	c.EnableWireguard = viper.GetBool(EnableWireguard)
 	c.EnableWellKnownIdentities = viper.GetBool(EnableWellKnownIdentities)
 	c.EndpointInterfaceNamePrefix = viper.GetString(EndpointInterfaceNamePrefix)
 	c.DevicePreFilter = viper.GetString(PrefilterDevice)
@@ -2564,9 +2624,10 @@ func (c *DaemonConfig) Populate() {
 	c.KubeProxyReplacement = viper.GetString(KubeProxyReplacement)
 	c.EnableSessionAffinity = viper.GetBool(EnableSessionAffinity)
 	c.EnableBandwidthManager = viper.GetBool(EnableBandwidthManager)
+	c.EnableRecorder = viper.GetBool(EnableRecorder)
 	c.EnableHostFirewall = viper.GetBool(EnableHostFirewall)
 	c.EnableLocalRedirectPolicy = viper.GetBool(EnableLocalRedirectPolicy)
-	c.EncryptInterface = viper.GetString(EncryptInterface)
+	c.EncryptInterface = viper.GetStringSlice(EncryptInterface)
 	c.EncryptNode = viper.GetBool(EncryptNode)
 	c.EnvoyLogPath = viper.GetString(EnvoyLog)
 	c.ForceLocalPolicyEvalAtSource = viper.GetBool(ForceLocalPolicyEvalAtSource)
@@ -2632,6 +2693,7 @@ func (c *DaemonConfig) Populate() {
 	c.FlannelMasterDevice = viper.GetString(FlannelMasterDevice)
 	c.FlannelUninstallOnExit = viper.GetBool(FlannelUninstallOnExit)
 	c.PProf = viper.GetBool(PProf)
+	c.PProfPort = viper.GetInt(PProfPort)
 	c.PreAllocateMaps = viper.GetBool(PreAllocateMapsName)
 	c.PrependIptablesChains = viper.GetBool(PrependIptablesChainsName)
 	c.PrometheusServeAddr = viper.GetString(PrometheusServeAddr)
@@ -2664,6 +2726,8 @@ func (c *DaemonConfig) Populate() {
 	c.LoadBalancerRSSv4CIDR = viper.GetString(LoadBalancerRSSv4CIDR)
 	c.LoadBalancerRSSv6CIDR = viper.GetString(LoadBalancerRSSv6CIDR)
 	c.EnableBPFBypassFIBLookup = viper.GetBool(EnableBPFBypassFIBLookup)
+	c.InstallNoConntrackIptRules = viper.GetBool(InstallNoConntrackIptRules)
+	c.EnableCustomCalls = viper.GetBool(EnableCustomCallsName)
 
 	err = c.populateMasqueradingSettings()
 	if err != nil {
@@ -2833,6 +2897,22 @@ func (c *DaemonConfig) Populate() {
 	}
 
 	c.KubeProxyReplacementHealthzBindAddr = viper.GetString(KubeProxyReplacementHealthzBindAddr)
+
+	if subnetV4 := viper.GetString(WireguardSubnetV4); subnetV4 != "" {
+		_, ipv4net, err := net.ParseCIDR(subnetV4)
+		if err != nil {
+			log.WithError(err).Fatalf("Failed to parse wireguard IPv4 subnet: %s", subnetV4)
+		}
+		c.WireguardSubnetV4 = ipv4net
+	}
+
+	if subnetV6 := viper.GetString(WireguardSubnetV6); subnetV6 != "" {
+		_, ipv6net, err := net.ParseCIDR(subnetV6)
+		if err != nil {
+			log.WithError(err).Fatalf("Failed to parse wireguard IPv6 subnet: %s", subnetV6)
+		}
+		c.WireguardSubnetV6 = ipv6net
+	}
 
 	// Hubble options.
 	c.EnableHubble = viper.GetBool(EnableHubble)
@@ -3054,7 +3134,7 @@ func (c *DaemonConfig) checkMapSizeLimits() error {
 
 func (c *DaemonConfig) checkIPv4NativeRoutingCIDR() error {
 	if c.IPv4NativeRoutingCIDR() == nil && c.EnableIPv4Masquerade && c.Tunnel == TunnelDisabled &&
-		c.IPAMMode() != ipamOption.IPAMENI && c.EnableIPv4 {
+		c.IPAMMode() != ipamOption.IPAMENI && c.EnableIPv4 && c.IPAMMode() != ipamOption.IPAMAlibabaCloud {
 		return fmt.Errorf(
 			"native routing cidr must be configured with option --%s "+
 				"in combination with --%s --%s=%s --%s=%s --%s=true",
@@ -3207,6 +3287,22 @@ func (c *DaemonConfig) calculateDynamicBPFMapSizes(totalMemory uint64, dynamicSi
 	} else {
 		log.Debugf("option %s set by user to %v", NATMapEntriesGlobalName, c.NATMapEntriesGlobal)
 	}
+}
+
+// KubeProxyReplacementFullyEnabled returns true if Cilium is _effectively_
+// running in full KPR mode.
+//
+// The extra logic to check that all the individual features are enabled is
+// required to deal with the case when KubeProxyReplacement mode is set to
+// "probe" (as Cilium may or may not be running full KPR mode).
+func (c *DaemonConfig) KubeProxyReplacementFullyEnabled() bool {
+	return c.EnableHostPort &&
+		c.EnableNodePort &&
+		c.EnableExternalIPs &&
+		c.EnableHostReachableServices &&
+		c.EnableHostServicesTCP &&
+		c.EnableHostServicesUDP &&
+		c.EnableSessionAffinity
 }
 
 func sanitizeIntParam(paramName string, paramDefault int) int {

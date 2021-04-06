@@ -71,6 +71,7 @@ cilium-agent [flags]
       --enable-bpf-clock-probe                               Enable BPF clock source probing for more efficient tick retrieval
       --enable-bpf-masquerade                                Masquerade packets from endpoints leaving the host with BPF instead of iptables
       --enable-bpf-tproxy                                    Enable BPF-based proxy redirection, if support available
+      --enable-custom-calls                                  Enable tail call hooks for custom eBPF programs
       --enable-endpoint-health-checking                      Enable connectivity health checking between virtual endpoints (default true)
       --enable-endpoint-routes                               Use per endpoint routes instead of routing via cilium_host
       --enable-external-ips                                  Enable k8s service externalIPs feature (requires enabling enable-node-port) (default true)
@@ -99,11 +100,13 @@ cilium-agent [flags]
       --enable-monitor                                       Enable the monitor unix domain socket server (default true)
       --enable-node-port                                     Enable NodePort type services by Cilium
       --enable-policy string                                 Enable policy enforcement (default "default")
+      --enable-recorder                                      Enable BPF datapath pcap recorder
       --enable-remote-node-identity                          Enable use of remote node identity
       --enable-session-affinity                              Enable support for service session affinity
       --enable-svc-source-range-check                        Enable check of service source ranges (currently, only for LoadBalancer) (default true)
       --enable-tracing                                       Enable tracing while determining policy (debugging)
       --enable-well-known-identities                         Enable well-known identities for known Kubernetes components (default true)
+      --enable-wireguard                                     Enable wireguard
       --enable-xt-socket-fallback                            Enable fallback for missing xt_socket module (default true)
       --encrypt-interface string                             Transparent encryption interface
       --encrypt-node                                         Enables encrypting traffic from non-Cilium pods and host networking
@@ -137,6 +140,7 @@ cilium-agent [flags]
       --identity-allocation-mode string                      Method to use for identity allocation (default "kvstore")
       --identity-change-grace-period duration                Time to wait before using new identity on endpoint identity change (default 5s)
       --install-iptables-rules                               Install base iptables rules for cilium to mainly interact with kube-proxy (and masquerading) (default true)
+      --install-no-conntrack-iptables-rules                  Install Iptables rules to skip netfilter connection tracking on all pod traffic. This option is only effective when Cilium is running in direct routing and full KPR mode. Moreover, this option cannot be enabled when Cilium is running in a managed Kubernetes environment or in a chained CNI setup.
       --ip-allocation-timeout duration                       Time after which an incomplete CIDR allocation is considered failed (default 2m0s)
       --ip-masq-agent-config-path string                     ip-masq-agent configuration file path (default "/etc/config/ip-masq-agent")
       --ipam string                                          Backend to use for IPAM (default "cluster-pool")
@@ -191,6 +195,7 @@ cilium-agent [flags]
       --policy-audit-mode                                    Enable policy audit (non-drop) mode
       --policy-queue-size int                                size of queues for policy-related events (default 100)
       --pprof                                                Enable serving the pprof debugging API
+      --pprof-port int                                       Port that the pprof listens on (default 6060)
       --preallocate-bpf-maps                                 Enable BPF map pre-allocation (default true)
       --prefilter-device string                              Device facing external network for XDP prefiltering (default "undefined")
       --prefilter-mode string                                Prefilter mode via XDP ("native", "generic") (default "native")
@@ -209,6 +214,7 @@ cilium-agent [flags]
       --tofqdns-dns-reject-response-code string              DNS response code for rejecting DNS requests, available options are '[nameError refused]' (default "refused")
       --tofqdns-enable-dns-compression                       Allow the DNS proxy to compress responses to endpoints that are larger than 512 Bytes or the EDNS0 option, if present (default true)
       --tofqdns-endpoint-max-ip-per-hostname int             Maximum number of IPs to maintain per FQDN name for each endpoint (default 50)
+      --tofqdns-idle-connection-grace-period duration        Time during which idle but previously active connections with expired DNS lookups are still considered alive (default 0s)
       --tofqdns-max-deferred-connection-deletes int          Maximum number of IPs to retain for expired DNS lookups with still-active connections (default 10000)
       --tofqdns-min-ttl int                                  The minimum time, in seconds, to use DNS data for toFQDNs policies. (default 3600 )
       --tofqdns-pre-cache string                             DNS cache data at this path is preloaded on agent startup
@@ -217,6 +223,8 @@ cilium-agent [flags]
       --trace-payloadlen int                                 Length of payload to capture when tracing (default 128)
   -t, --tunnel string                                        Tunnel mode {vxlan, geneve, disabled} (default "vxlan" for the "veth" datapath mode)
       --version                                              Print version information
+      --wireguard-subnet-v4 string                           Wireguard tunnel IPv4 subnet (default "172.16.43.0/24")
+      --wireguard-subnet-v6 string                           Wireguard tunnel IPv6 subnet (default "fdc9:281f:04d7:9ee9::1/64")
       --write-cni-conf-when-ready string                     Write the CNI configuration as specified via --read-cni-conf to path when agent is ready
 ```
 

@@ -417,6 +417,12 @@ data:
   enable-ip-masq-agent: "true"
 {{- end }}
 
+{{- if hasKey .Values "wireguard" }}
+{{- if .Values.wireguard.enabled }}
+  enable-wireguard: {{ .Values.wireguard.enabled | quote }}
+{{- end }}
+{{- end }}
+
 {{- if .Values.encryption.enabled }}
   enable-ipsec: {{ .Values.encryption.enabled | quote }}
   ipsec-key-file: {{ .Values.encryption.mountPath }}/{{ .Values.encryption.keyFile }}
@@ -436,6 +442,11 @@ data:
 
   enable-xt-socket-fallback: {{ .Values.enableXTSocketFallback | quote }}
   install-iptables-rules: {{ .Values.installIptablesRules | quote }}
+{{- if or (.Values.azure.enabled) (.Values.eni.enabled) (.Values.gke.enabled) (ne .Values.cni.chainingMode "none") }}
+  install-no-conntrack-iptables-rules: "false"
+{{- else }}
+  install-no-conntrack-iptables-rules: {{ .Values.installNoConntrackIptablesRules | quote }}
+{{- end}}
 
 {{- if hasKey .Values "iptablesRandomFully" }}
   iptables-random-fully: {{ .Values.iptablesRandomFully | quote }}
@@ -678,6 +689,11 @@ data:
 {{- if hasKey .Values.k8s "serviceProxyName" }}
   # Configure service proxy name for Cilium.
   k8s-service-proxy-name: {{ .Values.k8s.serviceProxyName | quote }}
+{{- end }}
+
+{{- if and .Values.customCalls .Values.customCalls.enabled }}
+  # Enable tail call hooks for custom eBPF programs.
+  enable-custom-calls: {{ .Values.customCalls.enabled | quote }}
 {{- end }}
 
 {{- if .Values.extraConfig }}

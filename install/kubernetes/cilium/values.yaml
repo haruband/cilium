@@ -358,6 +358,11 @@ containerRuntime:
 
 # crdWaitTimeout: ""
 
+# -- Tail call hooks for custom eBPF programs.
+customCalls:
+  # -- Enable tail call hooks for custom eBPF programs.
+  enabled: false
+
 # -- Configure which datapath mode should be used for configuring container
 # connectivity. Valid options are "veth" or "ipvlan".
 datapathMode: veth
@@ -796,6 +801,12 @@ identityAllocationMode: "crd"
 # with kube-proxy.
 installIptablesRules: true
 
+# -- Install Iptables rules to skip netfilter connection tracking on all pod
+# traffic. This option is only effective when Cilium is running in direct
+# routing and full KPR mode. Moreover, this option cannot be enabled when Cilium
+# is running in a managed Kubernetes environment or in a chained CNI setup.
+installNoConntrackIptablesRules: false
+
 ipam:
   # -- Configure IP Address Management mode.
   # ref: https://docs.cilium.io/en/stable/concepts/networking/ipam/
@@ -1110,14 +1121,8 @@ etcd:
   # running.
   k8sService: false
 
-  # -- Enable managed etcd mode based on the cilium-etcd-operator.
-  managed: false
-
   # -- Cluster domain for cilium-etcd-operator.
   clusterDomain: cluster.local
-
-  # -- Size of the managed etcd cluster.
-  clusterSize: 3
 
   # -- List of etcd endpoints (not needed when using managed=true).
   endpoints:

@@ -1,4 +1,4 @@
-// Copyright 2018-2019 Authors of Cilium
+// Copyright 2018-2021 Authors of Cilium
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -47,6 +47,7 @@ const (
 
 	symbolFromEndpoint = "from-container"
 	symbolToEndpoint   = "to-container"
+	symbolFromNetwork  = "from-network"
 
 	symbolFromHostNetdevEp = "from-netdev"
 	symbolToHostNetdevEp   = "to-netdev"
@@ -369,6 +370,18 @@ func (l *Loader) reloadDatapath(ctx context.Context, ep datapath.Endpoint, dirs 
 	return nil
 }
 
+func (l *Loader) replaceNetworkDatapath(ctx context.Context, interfaces []string) error {
+	if err := compileNetwork(ctx); err != nil {
+		log.WithError(err).Fatal("failed to compile encryption programs")
+	}
+	for _, iface := range option.Config.EncryptInterface {
+		if err := l.replaceDatapath(ctx, iface, networkObj, symbolFromNetwork, dirIngress); err != nil {
+			log.WithField(logfields.Interface, iface).Fatal("Load encryption network failed")
+		}
+	}
+	return nil
+}
+
 func (l *Loader) compileAndLoad(ctx context.Context, ep datapath.Endpoint, dirs *directoryInfo, stats *metrics.SpanStat) error {
 	stats.BpfCompilation.Start()
 	err := compileDatapath(ctx, dirs, ep.IsHost(), ep.Logger(Subsystem))
@@ -502,4 +515,10 @@ func (l *Loader) EndpointHash(cfg datapath.EndpointConfiguration) (string, error
 // CallsMapPath gets the BPF Calls Map for the endpoint with the specified ID.
 func (l *Loader) CallsMapPath(id uint16) string {
 	return bpf.LocalMapPath(callsmap.MapName, id)
+}
+
+// CustomCallsMapPath gets the BPF Custom Calls Map for the endpoint with the
+// specified ID.
+func (l *Loader) CustomCallsMapPath(id uint16) string {
+	return bpf.LocalMapPath(callsmap.CustomCallsMapName, id)
 }

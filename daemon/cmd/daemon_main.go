@@ -35,6 +35,7 @@ import (
 	"github.com/cilium/cilium/pkg/controller"
 	"github.com/cilium/cilium/pkg/datapath/connector"
 	"github.com/cilium/cilium/pkg/datapath/iptables"
+	"github.com/cilium/cilium/pkg/datapath/link"
 	linuxdatapath "github.com/cilium/cilium/pkg/datapath/linux"
 	"github.com/cilium/cilium/pkg/datapath/linux/ipsec"
 	"github.com/cilium/cilium/pkg/datapath/linux/probes"
@@ -75,6 +76,8 @@ import (
 	"github.com/cilium/cilium/pkg/policy"
 	"github.com/cilium/cilium/pkg/pprof"
 	"github.com/cilium/cilium/pkg/version"
+	wireguard "github.com/cilium/cilium/pkg/wireguard/agent"
+	wireguardTypes "github.com/cilium/cilium/pkg/wireguard/types"
 
 	"github.com/go-openapi/loads"
 	gops "github.com/google/gops/agent"
@@ -388,6 +391,15 @@ func init() {
 	flags.String(option.IPSecKeyFileName, "", "Path to IPSec key file")
 	option.BindEnv(option.IPSecKeyFileName)
 
+	flags.Bool(option.EnableWireguard, false, "Enable wireguard")
+	option.BindEnv(option.EnableWireguard)
+
+	flags.String(option.WireguardSubnetV4, defaults.WireguardSubnetV4, "Wireguard tunnel IPv4 subnet")
+	option.BindEnv(option.WireguardSubnetV4)
+
+	flags.String(option.WireguardSubnetV6, defaults.WireguardSubnetV6, "Wireguard tunnel IPv6 subnet")
+	option.BindEnv(option.WireguardSubnetV6)
+
 	flags.Bool(option.ForceLocalPolicyEvalAtSource, defaults.ForceLocalPolicyEvalAtSource, "Force policy evaluation of all local communication at the source endpoint")
 	option.BindEnv(option.ForceLocalPolicyEvalAtSource)
 
@@ -539,6 +551,9 @@ func init() {
 
 	flags.Bool(option.EnableBandwidthManager, false, "Enable BPF bandwidth manager")
 	option.BindEnv(option.EnableBandwidthManager)
+
+	flags.Bool(option.EnableRecorder, false, "Enable BPF datapath pcap recorder")
+	option.BindEnv(option.EnableRecorder)
 
 	flags.Bool(option.EnableLocalRedirectPolicy, false, "Enable Local Redirect Policy")
 	option.BindEnv(option.EnableLocalRedirectPolicy)
@@ -728,6 +743,9 @@ func init() {
 	flags.Bool(option.PProf, false, "Enable serving the pprof debugging API")
 	option.BindEnv(option.PProf)
 
+	flags.Int(option.PProfPort, 6060, "Port that the pprof listens on")
+	option.BindEnv(option.PProfPort)
+
 	flags.String(option.PrefilterDevice, "undefined", "Device facing external network for XDP prefiltering")
 	option.BindEnv(option.PrefilterDevice)
 
@@ -817,6 +835,9 @@ func init() {
 
 	flags.Int(option.ToFQDNsMaxDeferredConnectionDeletes, defaults.ToFQDNsMaxDeferredConnectionDeletes, "Maximum number of IPs to retain for expired DNS lookups with still-active connections")
 	option.BindEnv(option.ToFQDNsMaxDeferredConnectionDeletes)
+
+	flags.DurationVar(&option.Config.ToFQDNsIdleConnectionGracePeriod, option.ToFQDNsIdleConnectionGracePeriod, defaults.ToFQDNsIdleConnectionGracePeriod, "Time during which idle but previously active connections with expired DNS lookups are still considered alive (default 0s)")
+	option.BindEnv(option.ToFQDNsIdleConnectionGracePeriod)
 
 	flags.DurationVar(&option.Config.FQDNProxyResponseMaxDelay, option.FQDNProxyResponseMaxDelay, 100*time.Millisecond, "The maximum time the DNS proxy holds an allowed DNS response before sending it along. Responses are sent as soon as the datapath is updated with the new IP information.")
 	option.BindEnv(option.FQDNProxyResponseMaxDelay)
@@ -927,6 +948,12 @@ func init() {
 
 	flags.Bool(option.EnableBPFBypassFIBLookup, defaults.EnableBPFBypassFIBLookup, "Enable FIB lookup bypass optimization for nodeport reverse NAT handling")
 	option.BindEnv(option.EnableBPFBypassFIBLookup)
+
+	flags.Bool(option.InstallNoConntrackIptRules, defaults.InstallNoConntrackIptRules, "Install Iptables rules to skip netfilter connection tracking on all pod traffic. This option is only effective when Cilium is running in direct routing and full KPR mode. Moreover, this option cannot be enabled when Cilium is running in a managed Kubernetes environment or in a chained CNI setup.")
+	option.BindEnv(option.InstallNoConntrackIptRules)
+
+	flags.Bool(option.EnableCustomCallsName, false, "Enable tail call hooks for custom eBPF programs")
+	option.BindEnv(option.EnableCustomCallsName)
 
 	viper.BindPFlags(flags)
 
@@ -1050,7 +1077,7 @@ func initEnv(cmd *cobra.Command) {
 	}
 
 	if option.Config.PProf {
-		pprof.Enable()
+		pprof.Enable(option.Config.PProfPort)
 	}
 
 	if option.Config.PreAllocateMaps {
@@ -1260,12 +1287,17 @@ func initEnv(cmd *cobra.Command) {
 		}
 	}
 
-	if option.Config.EnableIPSec && option.Config.Tunnel == option.TunnelDisabled && option.Config.EncryptInterface == "" {
+	// IPAMENI IPSec is configured from Reinitialize() to pull in devices
+	// that may be added or removed at runtime.
+	if option.Config.EnableIPSec &&
+		option.Config.Tunnel == option.TunnelDisabled &&
+		len(option.Config.EncryptInterface) == 0 &&
+		option.Config.IPAM != ipamOption.IPAMENI {
 		link, err := linuxdatapath.NodeDeviceNameWithDefaultRoute()
 		if err != nil {
 			log.WithError(err).Fatal("Ipsec default interface lookup failed, consider \"encrypt-interface\" to manually configure interface.")
 		}
-		option.Config.EncryptInterface = link
+		option.Config.EncryptInterface = append(option.Config.EncryptInterface, link)
 	}
 
 	if option.Config.Tunnel != option.TunnelDisabled && option.Config.EnableAutoDirectRouting {
@@ -1275,13 +1307,8 @@ func initEnv(cmd *cobra.Command) {
 	initClockSourceOption()
 	initSockmapOption()
 
-	if option.Config.EnableHostFirewall {
-		if option.Config.EnableIPSec {
-			log.Fatal("IPSec cannot be used with the host firewall.")
-		}
-		if option.Config.EnableEndpointRoutes {
-			log.Fatalf("%s cannot be used with the host firewall. Packets must be routed through the host device.", option.EnableEndpointRoutes)
-		}
+	if option.Config.EnableHostFirewall && option.Config.EnableIPSec {
+		log.Fatal("IPSec cannot be used with the host firewall.")
 	}
 
 	if option.Config.EnableBandwidthManager && option.Config.EnableIPSec {
@@ -1370,6 +1397,22 @@ func initEnv(cmd *cobra.Command) {
 			option.EgressMultiHomeIPRuleCompat,
 		)
 	}
+
+	if option.Config.InstallNoConntrackIptRules {
+		// InstallNoConntrackIptRules can only be enabled in direct
+		// routing mode as in tunneling mode the encapsulated traffic is
+		// already skipping netfilter conntrack.
+		if option.Config.Tunnel != option.TunnelDisabled {
+			log.Fatalf("%s requires the agent to run in direct routing mode.", option.InstallNoConntrackIptRules)
+		}
+
+		// Moreover InstallNoConntrackIptRules requires IPv4 support as
+		// the native routing CIDR, used to select all pod traffic, can
+		// only be an IPv4 CIDR at the moment.
+		if !option.Config.EnableIPv4 {
+			log.Fatalf("%s requires IPv4 support.", option.InstallNoConntrackIptRules)
+		}
+	}
 }
 
 func (d *Daemon) initKVStore() {
@@ -1421,8 +1464,8 @@ func (d *Daemon) initKVStore() {
 
 func runDaemon() {
 	datapathConfig := linuxdatapath.DatapathConfiguration{
-		HostDevice:       option.Config.HostDevice,
-		EncryptInterface: option.Config.EncryptInterface,
+		HostDevice:        option.Config.HostDevice,
+		EncryptInterfaces: option.Config.EncryptInterface,
 	}
 
 	log.Info("Initializing daemon")
@@ -1450,6 +1493,35 @@ func runDaemon() {
 	iptablesManager := &iptables.IptablesManager{}
 	iptablesManager.Init()
 
+	var wgAgent *wireguard.Agent
+	if option.Config.EnableWireguard {
+		switch {
+		case option.Config.Tunnel != option.TunnelDisabled:
+			log.Fatalf("Wireguard (--%s) cannot be used with tunneling", option.EnableWireguard)
+		case option.Config.EnableIPSec:
+			log.Fatalf("Wireguard (--%s) cannot be used with IPSec (--%s)",
+				option.EnableWireguard, option.EnableIPSecName)
+		case option.Config.EnableL7Proxy:
+			log.Fatalf("Wireguard (--%s) is not compatible with L7 proxy (--%s)",
+				option.EnableWireguard, option.EnableL7Proxy)
+		}
+
+		var err error
+		privateKeyPath := filepath.Join(option.Config.StateDir, wireguardTypes.PrivKeyFilename)
+		wgAgent, err = wireguard.NewAgent(privateKeyPath,
+			option.Config.WireguardSubnetV4, option.Config.WireguardSubnetV6)
+		if err != nil {
+			log.WithError(err).Fatal("Failed to initialize wireguard")
+		}
+
+		cleaner.cleanupFuncs.Add(func() {
+			_ = wgAgent.Close()
+		})
+	} else {
+		// Delete wireguard device from previous run (if such exists)
+		link.DeleteByName(wireguardTypes.IfaceName)
+	}
+
 	if k8s.IsEnabled() {
 		bootstrapStats.k8sInit.Start()
 		if err := k8s.Init(option.Config); err != nil {
@@ -1461,7 +1533,7 @@ func runDaemon() {
 	ctx, cancel := context.WithCancel(server.ServerCtx)
 	d, restoredEndpoints, err := NewDaemon(ctx, cancel,
 		WithDefaultEndpointManager(ctx, endpoint.CheckHealth),
-		linuxdatapath.NewDatapath(datapathConfig, iptablesManager))
+		linuxdatapath.NewDatapath(datapathConfig, iptablesManager, wgAgent))
 	if err != nil {
 		select {
 		case <-server.ServerCtx.Done():
@@ -1501,6 +1573,11 @@ func runDaemon() {
 	}
 	bootstrapStats.k8sInit.End(true)
 	restoreComplete := d.initRestore(restoredEndpoints)
+	if wgAgent != nil {
+		if err := wgAgent.RestoreFinished(); err != nil {
+			log.WithError(err).Error("Failed to set up wireguard peers")
+		}
+	}
 
 	if !d.endpointManager.HostEndpointExists() {
 		log.Info("Creating host endpoint")

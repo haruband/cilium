@@ -66,10 +66,9 @@ func getIPSecKeys(ip net.IP) *ipSecKey {
 
 func ipSecNewState() *netlink.XfrmState {
 	state := netlink.XfrmState{
-		Mode:         netlink.XFRM_MODE_TUNNEL,
-		Proto:        netlink.XFRM_PROTO_ESP,
-		ESN:          true,
-		ReplayWindow: 1024,
+		Mode:  netlink.XFRM_MODE_TUNNEL,
+		Proto: netlink.XFRM_PROTO_ESP,
+		ESN:   false,
 	}
 	return &state
 }
@@ -178,6 +177,7 @@ func _ipSecReplacePolicyInFwd(src, dst, tmplSrc, tmplDst *net.IPNet, dir netlink
 	// policy because Cilium BPF programs do that.
 	if dir == netlink.XFRM_DIR_FWD {
 		optional = 1
+		policy.Priority = linux_defaults.IPsecFwdPriority
 	}
 	ipSecAttachPolicyTempl(policy, key, tmplSrc.IP, tmplDst.IP, false, optional)
 	return netlink.XfrmPolicyUpdate(policy)
@@ -187,7 +187,7 @@ func ipSecReplacePolicyIn(src, dst, tmplSrc, tmplDst *net.IPNet) error {
 	return _ipSecReplacePolicyInFwd(src, dst, tmplSrc, tmplDst, netlink.XFRM_DIR_IN)
 }
 
-func ipSecReplacePolicyFwd(src, dst, tmplSrc, tmplDst *net.IPNet) error {
+func IpSecReplacePolicyFwd(src, dst, tmplSrc, tmplDst *net.IPNet) error {
 	return _ipSecReplacePolicyInFwd(src, dst, tmplSrc, tmplDst, netlink.XFRM_DIR_FWD)
 }
 
@@ -343,7 +343,7 @@ func UpsertIPsecEndpoint(local, remote, fwd *net.IPNet, dir IPSecDir, outputMark
 					return 0, fmt.Errorf("unable to replace policy in: %s", err)
 				}
 			}
-			if err = ipSecReplacePolicyFwd(remote, fwd, remote, local); err != nil {
+			if err = IpSecReplacePolicyFwd(remote, fwd, remote, local); err != nil {
 				if !os.IsExist(err) {
 					return 0, fmt.Errorf("unable to replace policy fwd: %s", err)
 				}
@@ -386,13 +386,19 @@ func DeleteIPsecEndpoint(remote *net.IPNet) {
 
 func isXfrmPolicyCilium(policy netlink.XfrmPolicy) bool {
 	if policy.Mark == nil {
+		// Check if its our fwd rule, we don't have a mark
+		// on this rule so use priority.
+		if policy.Dir == netlink.XFRM_DIR_FWD &&
+			policy.Priority == linux_defaults.IPsecFwdPriority {
+			return true
+		}
 		return false
 	}
-	if policy.Mark.Mask != linux_defaults.RouteMarkMask {
-		return false
+
+	if (policy.Mark.Value & linux_defaults.RouteMarkDecrypt) != 0 {
+		return true
 	}
-	if policy.Mark.Value == linux_defaults.RouteMarkDecrypt ||
-		policy.Mark.Value == linux_defaults.RouteMarkEncrypt {
+	if (policy.Mark.Value & linux_defaults.RouteMarkEncrypt) != 0 {
 		return true
 	}
 	return false
@@ -402,11 +408,10 @@ func isXfrmStateCilium(state netlink.XfrmState) bool {
 	if state.Mark == nil {
 		return false
 	}
-	if state.Mark.Mask != linux_defaults.RouteMarkMask {
-		return false
+	if (state.Mark.Value & linux_defaults.RouteMarkDecrypt) != 0 {
+		return true
 	}
-	if state.Mark.Value == linux_defaults.RouteMarkDecrypt ||
-		state.Mark.Value == linux_defaults.RouteMarkEncrypt {
+	if (state.Mark.Value & linux_defaults.RouteMarkEncrypt) != 0 {
 		return true
 	}
 	return false

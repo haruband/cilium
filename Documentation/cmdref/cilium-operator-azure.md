@@ -34,6 +34,7 @@ cilium-operator-azure [flags]
       --enable-k8s-endpoint-slice                 Enables k8s EndpointSlice feature into Cilium-Operator if the k8s cluster supports it (default true)
       --enable-k8s-event-handover                 Enable k8s event handover to kvstore for improved scalability
       --enable-metrics                            Enable Prometheus metrics
+      --enable-wireguard                          Enable wireguard
       --gops-port int                             Port for gops server to listen on (default 9891)
   -h, --help                                      help for cilium-operator-azure
       --identity-allocation-mode string           Method to use for identity allocation (default "kvstore")
@@ -63,12 +64,15 @@ cilium-operator-azure [flags]
       --operator-prometheus-serve-addr string     Address to serve Prometheus metrics (default ":6942")
       --parallel-alloc-workers int                Maximum number of parallel IPAM workers (default 50)
       --pprof                                     Enable pprof debugging endpoint
+      --pprof-port int                            Port that the pprof listens on (default 6061)
       --subnet-ids-filter strings                 Subnets IDs (separated by commas)
       --subnet-tags-filter stringToString         Subnets tags in the form of k1=v1,k2=v2 (multiple k/v pairs can also be passed by repeating the CLI flag (default [])
       --synchronize-k8s-nodes                     Synchronize Kubernetes nodes to kvstore and perform CNP GC (default true)
       --synchronize-k8s-services                  Synchronize Kubernetes services to kvstore (default true)
       --unmanaged-pod-watcher-interval int        Interval to check for unmanaged kube-dns pods (0 to disable) (default 15)
       --version                                   Print version information
+      --wireguard-subnet-v4 string                Wireguard tunnel IPv4 subnet (default "172.16.43.0/24")
+      --wireguard-subnet-v6 string                Wireguard tunnel IPv6 subnet (default "fdc9:281f:04d7:9ee9::1/64")
 ```
 
 ### SEE ALSO

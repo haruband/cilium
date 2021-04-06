@@ -502,7 +502,7 @@ func NewDaemon(ctx context.Context, cancel context.CancelFunc, epMgr *endpointma
 			return nil, restoredEndpoints, err
 		}
 
-		if option.Config.IPAM == ipamOption.IPAMClusterPool {
+		if option.Config.IPAM == ipamOption.IPAMClusterPool || option.Config.EnableWireguard {
 			// Create the CiliumNode custom resource. This call will block until
 			// the custom resource has been created
 			d.nodeDiscovery.UpdateCiliumNodeResource()
@@ -522,6 +522,12 @@ func NewDaemon(ctx context.Context, cancel context.CancelFunc, epMgr *endpointma
 		}
 
 		bootstrapStats.k8sInit.End(true)
+	}
+
+	if wgAgent := dp.WireguardAgent(); option.Config.EnableWireguard {
+		if err := wgAgent.Init(); err != nil {
+			log.WithError(err).Fatal("Failed to initialize wireguard agent")
+		}
 	}
 
 	// Perform an early probe on the underlying kernel on whether BandwidthManager
@@ -595,6 +601,8 @@ func NewDaemon(ctx context.Context, cancel context.CancelFunc, epMgr *endpointma
 		}
 	} else if option.Config.EnableIPMasqAgent {
 		log.Fatalf("BPF ip-masq-agent requires --%s=\"true\" and --%s=\"true\"", option.Masquerade, option.EnableBPFMasquerade)
+	} else if option.Config.EnableEgressGateway {
+		log.Fatalf("Egress Gateway requires --%s=\"true\" and --%s=\"true\"", option.Masquerade, option.EnableBPFMasquerade)
 	} else if !option.Config.EnableIPv4Masquerade && option.Config.EnableBPFMasquerade {
 		// There is not yet support for option.Config.EnableIPv6Masquerade
 		log.Infof("Auto-disabling %q feature since IPv4 masquerading was generally disabled",
@@ -710,7 +718,8 @@ func NewDaemon(ctx context.Context, cancel context.CancelFunc, epMgr *endpointma
 
 	// Trigger refresh and update custom resource in the apiserver with all restored endpoints.
 	// Trigger after nodeDiscovery.StartDiscovery to avoid custom resource update conflict.
-	if option.Config.IPAM == ipamOption.IPAMCRD || option.Config.IPAM == ipamOption.IPAMENI || option.Config.IPAM == ipamOption.IPAMAzure {
+	if option.Config.IPAM == ipamOption.IPAMCRD || option.Config.IPAM == ipamOption.IPAMENI || option.Config.IPAM == ipamOption.IPAMAzure ||
+		option.Config.IPAM == ipamOption.IPAMAlibabaCloud {
 		if option.Config.EnableIPv6 {
 			d.ipam.IPv6Allocator.RestoreFinished()
 		}

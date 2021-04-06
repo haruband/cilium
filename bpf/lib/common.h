@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0 */
-/* Copyright (C) 2016-2020 Authors of Cilium */
+/* Copyright (C) 2016-2021 Authors of Cilium */
 
 #ifndef __LIB_COMMON_H_
 #define __LIB_COMMON_H_
@@ -81,7 +81,9 @@
 #define CILIUM_CALL_NAT46			9
 #define CILIUM_CALL_IPV6_FROM_LXC		10
 #define CILIUM_CALL_IPV4_TO_LXC_POLICY_ONLY	11
+#define CILIUM_CALL_IPV4_TO_HOST_POLICY_ONLY	CILIUM_CALL_IPV4_TO_LXC_POLICY_ONLY
 #define CILIUM_CALL_IPV6_TO_LXC_POLICY_ONLY	12
+#define CILIUM_CALL_IPV6_TO_HOST_POLICY_ONLY	CILIUM_CALL_IPV6_TO_LXC_POLICY_ONLY
 #define CILIUM_CALL_IPV4_TO_ENDPOINT		13
 #define CILIUM_CALL_IPV6_TO_ENDPOINT		14
 #define CILIUM_CALL_IPV4_NODEPORT_NAT		15
@@ -302,7 +304,6 @@ enum {
 	POLICY_EGRESS = 2,
 };
 
-
 enum {
 	POLICY_MATCH_NONE = 0,
 	POLICY_MATCH_L3_ONLY = 1,
@@ -312,12 +313,18 @@ enum {
 };
 
 enum {
+	CAPTURE_INGRESS = 1,
+	CAPTURE_EGRESS = 2,
+};
+
+enum {
 	CILIUM_NOTIFY_UNSPEC,
 	CILIUM_NOTIFY_DROP,
 	CILIUM_NOTIFY_DBG_MSG,
 	CILIUM_NOTIFY_DBG_CAPTURE,
 	CILIUM_NOTIFY_TRACE,
 	CILIUM_NOTIFY_POLICY_VERDICT,
+	CILIUM_NOTIFY_CAPTURE,
 };
 
 #define NOTIFY_COMMON_HDR \
@@ -442,6 +449,7 @@ enum {
 #define REASON_LB_REVNAT_STALE		8
 #define REASON_FRAG_PACKET		9
 #define REASON_FRAG_PACKET_UPDATE	10
+#define REASON_MISSED_CUSTOM_CALL	11
 
 /* Lookup scope for externalTrafficPolicy=Local */
 #define LB_LOOKUP_SCOPE_EXT	0
@@ -562,6 +570,7 @@ enum {
 #define	CB_HINT			CB_SRC_LABEL	/* Alias, non-overlapping */
 #define	CB_PROXY_MAGIC		CB_SRC_LABEL	/* Alias, non-overlapping */
 #define	CB_ENCRYPT_MAGIC	CB_SRC_LABEL	/* Alias, non-overlapping */
+#define	CB_DST_ENDPOINT_ID	CB_SRC_LABEL    /* Alias, non-overlapping */
 	CB_IFINDEX,
 #define	CB_ADDR_V4		CB_IFINDEX	/* Alias, non-overlapping */
 #define	CB_ADDR_V6_1		CB_IFINDEX	/* Alias, non-overlapping */
@@ -578,6 +587,7 @@ enum {
 #define	CB_ENCRYPT_DST		CB_CT_STATE	/* Alias, non-overlapping,
 						 * Not used by xfrm.
 						 */
+#define	CB_CUSTOM_CALLS		CB_CT_STATE	/* Alias, non-overlapping */
 };
 
 /* State values for NAT46 */

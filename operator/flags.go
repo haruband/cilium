@@ -101,6 +101,15 @@ func init() {
 		option.LogOpt, "Log driver options for cilium-operator")
 	option.BindEnv(option.LogOpt)
 
+	flags.Bool(option.EnableWireguard, false, "Enable wireguard")
+	option.BindEnv(option.EnableWireguard)
+
+	flags.String(option.WireguardSubnetV4, defaults.WireguardSubnetV4, "Wireguard tunnel IPv4 subnet")
+	option.BindEnv(option.WireguardSubnetV4)
+
+	flags.String(option.WireguardSubnetV6, defaults.WireguardSubnetV6, "Wireguard tunnel IPv6 subnet")
+	option.BindEnv(option.WireguardSubnetV6)
+
 	var defaultIPAM string
 	switch binaryName {
 	case "cilium-operator":
@@ -109,6 +118,8 @@ func init() {
 		defaultIPAM = ipamOption.IPAMENI
 	case "cilium-operator-azure":
 		defaultIPAM = ipamOption.IPAMAzure
+	case "cilium-operator-alibabacloud":
+		defaultIPAM = ipamOption.IPAMAlibabaCloud
 	case "cilium-operator-generic":
 		defaultIPAM = ipamOption.IPAMClusterPool
 	}
@@ -129,6 +140,8 @@ func init() {
 				return "cilium-operator-aws"
 			case ipamOption.IPAMAzure:
 				return "cilium-operator-azure"
+			case ipamOption.IPAMAlibabaCloud:
+				return "cilium-operator-alibabacloud"
 			case ipamOption.IPAMKubernetes, ipamOption.IPAMClusterPool, ipamOption.IPAMCRD:
 				return "cilium-operator-generic"
 			default:
@@ -157,9 +170,13 @@ func init() {
 			if ipamFlagValue != ipamOption.IPAMAzure {
 				return unsupporterErr()
 			}
+		case "cilium-operator-alibabacloud":
+			if ipamFlagValue != ipamOption.IPAMAlibabaCloud {
+				return unsupporterErr()
+			}
 		case "cilium-operator-generic":
 			switch ipamFlagValue {
-			case ipamOption.IPAMENI, ipamOption.IPAMAzure:
+			case ipamOption.IPAMENI, ipamOption.IPAMAzure, ipamOption.IPAMAlibabaCloud:
 				return unsupporterErr()
 			}
 		}
@@ -250,6 +267,9 @@ func init() {
 
 	flags.Bool(operatorOption.PProf, false, "Enable pprof debugging endpoint")
 	option.BindEnv(operatorOption.PProf)
+
+	flags.Int(operatorOption.PProfPort, 6061, "Port that the pprof listens on")
+	option.BindEnv(operatorOption.PProfPort)
 
 	flags.Bool(operatorOption.SyncK8sServices, true, "Synchronize Kubernetes services to kvstore")
 	option.BindEnv(operatorOption.SyncK8sServices)
