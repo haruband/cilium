@@ -212,6 +212,9 @@ func pidFromProcess(proc *os.Process) string {
 // compileAndLink links the specified program from the specified path to the
 // intermediate representation, to the output specified in the prog's info.
 func compileAndLink(ctx context.Context, prog *progInfo, dir *directoryInfo, debug bool, compileArgs ...string) error {
+  log.Info("MINE: compileAndLink: ", prog.Source, ",", prog.Output, ",", prog.OutputType)
+  log.Info("MINE: compile: ", compiler, ",", compileArgs)
+
 	compileCmd, cancelCompile := exec.WithCancel(ctx, compiler, compileArgs...)
 	defer cancelCompile()
 	compilerStdout, compilerStderr, err := prepareCmdPipes(compileCmd)
@@ -226,6 +229,8 @@ func compileAndLink(ctx context.Context, prog *progInfo, dir *directoryInfo, deb
 	linkArgs = append(linkArgs, standardLDFlags...)
 	linkArgs = append(linkArgs, "-mcpu="+GetBPFCPU())
 	linkArgs = append(linkArgs, progLDFlags(prog, dir)...)
+
+  log.Info("MINE: link: ", linker, ",", linkArgs)
 
 	linkCmd := exec.CommandContext(ctx, linker, linkArgs...)
 	linkCmd.Stdin = compilerStdout
