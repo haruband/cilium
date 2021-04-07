@@ -5,6 +5,7 @@
 *.so.*
 
 # LLVM IR files
+*.bc
 *.ll
 *.ll-*
 
