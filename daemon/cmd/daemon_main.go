@@ -47,6 +47,7 @@ import (
 	"github.com/cilium/cilium/pkg/endpoint"
 	"github.com/cilium/cilium/pkg/envoy"
 	"github.com/cilium/cilium/pkg/flowdebug"
+	"github.com/cilium/cilium/pkg/hubble/exporter/exporteroption"
 	"github.com/cilium/cilium/pkg/hubble/observer/observeroption"
 	"github.com/cilium/cilium/pkg/identity"
 	ipamOption "github.com/cilium/cilium/pkg/ipam/option"
@@ -183,6 +184,14 @@ func init() {
 	}
 
 	cobra.OnInitialize(option.InitConfig("Cilium", "ciliumd"))
+
+	// Reset the help function to also exit, as we block elsewhere in interrupts
+	// and would not exit when called with -h.
+	oldHelpFunc := RootCmd.HelpFunc()
+	RootCmd.SetHelpFunc(func(c *cobra.Command, a []string) {
+		oldHelpFunc(c, a)
+		os.Exit(0)
+	})
 
 	flags := RootCmd.Flags()
 
@@ -398,12 +407,6 @@ func init() {
 	flags.Bool(option.EnableWireguard, false, "Enable wireguard")
 	option.BindEnv(option.EnableWireguard)
 
-	flags.String(option.WireguardSubnetV4, defaults.WireguardSubnetV4, "Wireguard tunnel IPv4 subnet")
-	option.BindEnv(option.WireguardSubnetV4)
-
-	flags.String(option.WireguardSubnetV6, defaults.WireguardSubnetV6, "Wireguard tunnel IPv6 subnet")
-	option.BindEnv(option.WireguardSubnetV6)
-
 	flags.Bool(option.ForceLocalPolicyEvalAtSource, defaults.ForceLocalPolicyEvalAtSource, "Force policy evaluation of all local communication at the source endpoint")
 	option.BindEnv(option.ForceLocalPolicyEvalAtSource)
 
@@ -526,6 +529,9 @@ func init() {
 	flags.MarkHidden(option.K8sSyncTimeoutName)
 	option.BindEnv(option.K8sSyncTimeoutName)
 
+	flags.Duration(option.AllocatorListTimeoutName, defaults.AllocatorListTimeout, "Timeout for listing allocator state before exiting")
+	option.BindEnv(option.AllocatorListTimeoutName)
+
 	flags.String(option.LabelPrefixFile, "", "Valid label prefixes file path")
 	option.BindEnv(option.LabelPrefixFile)
 
@@ -632,7 +638,8 @@ func init() {
 	option.BindEnv(option.LogDriver)
 
 	flags.Var(option.NewNamedMapOptions(option.LogOpt, &option.Config.LogOpt, nil),
-		option.LogOpt, "Log driver options for cilium")
+		option.LogOpt, `Log driver options for cilium-agent, `+
+			`configmap example for syslog driver: {"syslog.level":"info","syslog.facility":"local5","syslog.tag":"cilium-agent"}`)
 	option.BindEnv(option.LogOpt)
 
 	flags.Bool(option.LogSystemLoadConfigName, false, "Enable periodic logging of system load")
@@ -919,6 +926,18 @@ func init() {
 	flags.StringSlice(option.HubbleMetrics, []string{}, "List of Hubble metrics to enable.")
 	option.BindEnv(option.HubbleMetrics)
 
+	flags.String(option.HubbleExportFilePath, exporteroption.Default.Path, "Filepath to write Hubble events to.")
+	option.BindEnv(option.HubbleExportFilePath)
+
+	flags.Int(option.HubbleExportFileMaxSizeMB, exporteroption.Default.MaxSizeMB, "Size in MB at which to rotate Hubble export file.")
+	option.BindEnv(option.HubbleExportFileMaxSizeMB)
+
+	flags.Int(option.HubbleExportFileMaxBackups, exporteroption.Default.MaxBackups, "Number of rotated Hubble export files to keep.")
+	option.BindEnv(option.HubbleExportFileMaxBackups)
+
+	flags.Bool(option.HubbleExportFileCompress, exporteroption.Default.Compress, "Compress rotated Hubble export files.")
+	option.BindEnv(option.HubbleExportFileCompress)
+
 	flags.StringSlice(option.DisableIptablesFeederRules, []string{}, "Chains to ignore when installing feeder rules.")
 	option.BindEnv(option.DisableIptablesFeederRules)
 
@@ -959,13 +978,13 @@ func init() {
 	flags.Bool(option.EnableCustomCallsName, false, "Enable tail call hooks for custom eBPF programs")
 	option.BindEnv(option.EnableCustomCallsName)
 
+	flags.Bool(option.BGPAnnounceLBIP, false, "Announces service IPs of type LoadBalancer via BGP")
+	option.BindEnv(option.BGPAnnounceLBIP)
+
+	flags.String(option.BGPConfigPath, "/var/lib/cilium/bgp/config.yaml", "Path to file containing the BGP configuration")
+	option.BindEnv(option.BGPConfigPath)
+
 	viper.BindPFlags(flags)
-
-	CustomCommandHelpFormat(RootCmd, option.HelpFlagSections)
-
-	// Reset the help function to also exit, as we block elsewhere in interrupts
-	// and would not exit when called with -h.
-	ResetHelpandExit(RootCmd)
 }
 
 // restoreExecPermissions restores file permissions to 0740 of all files inside
@@ -1010,7 +1029,9 @@ func initEnv(cmd *cobra.Command) {
 	logging.DefaultLogger.Hooks.Add(metrics.NewLoggingHook(components.CiliumAgentName))
 
 	// Logging should always be bootstrapped first. Do not add any code above this!
-	logging.SetupLogging(option.Config.LogDriver, logging.LogOptions(option.Config.LogOpt), "cilium-agent", option.Config.Debug)
+	if err := logging.SetupLogging(option.Config.LogDriver, logging.LogOptions(option.Config.LogOpt), "cilium-agent", option.Config.Debug); err != nil {
+		log.Fatal(err)
+	}
 
 	option.LogRegisteredOptions(log)
 
@@ -1371,10 +1392,6 @@ func initEnv(cmd *cobra.Command) {
 		}
 	}
 
-	if !probes.NewProbeManager().GetMisc().HaveLargeInsnLimit {
-		option.Config.NeedsRelaxVerifier = true
-	}
-
 	if option.Config.LocalRouterIP != "" {
 		if option.Config.IPAM != "" {
 			log.Fatalf("Cannot specify %s along with %s, leave router IP unspecified if Cilium is handling IPAM.", option.LocalRouterIP, option.IPAM)
@@ -1417,6 +1434,25 @@ func initEnv(cmd *cobra.Command) {
 			log.Fatalf("%s requires IPv4 support.", option.InstallNoConntrackIptRules)
 		}
 	}
+
+	// This is necessary because the code inside pkg/k8s.NewService() for
+	// parsing services would not trigger unless NodePort is enabled. Without
+	// NodePort enabled, the external and LB IPs would not be parsed out.
+	if option.Config.BGPAnnounceLBIP {
+		option.Config.EnableNodePort = true
+		log.Infof("Auto-set BPF NodePort (%q) because LB IP announcements via BGP depend on it.", option.EnableNodePort)
+
+		if option.Config.K8sEnableK8sEndpointSlice {
+			option.Config.K8sEnableK8sEndpointSlice = false
+			log.WithFields(logrus.Fields{
+				logfields.URL: "https://github.com/metallb/metallb/issues/811",
+			}).Warnf(
+				"Disabling EndpointSlice support (%q) due to incompatibility with BGP mode. "+
+					"Cilium will fallback to using the original Endpoint resource.",
+				option.K8sEnableEndpointSlice,
+			)
+		}
+	}
 }
 
 func (d *Daemon) initKVStore() {
@@ -1447,6 +1483,7 @@ func (d *Daemon) initKVStore() {
 		d.k8sWatcher.WaitForCacheSync(
 			watchers.K8sAPIGroupServiceV1Core,
 			watchers.K8sAPIGroupEndpointV1Core,
+			watchers.K8sAPIGroupEndpointSliceV1Discovery,
 			watchers.K8sAPIGroupEndpointSliceV1Beta1Discovery,
 		)
 		log := log.WithField(logfields.LogSubsys, "etcd")
@@ -1512,8 +1549,7 @@ func runDaemon() {
 
 		var err error
 		privateKeyPath := filepath.Join(option.Config.StateDir, wireguardTypes.PrivKeyFilename)
-		wgAgent, err = wireguard.NewAgent(privateKeyPath,
-			option.Config.WireguardSubnetV4, option.Config.WireguardSubnetV6)
+		wgAgent, err = wireguard.NewAgent(privateKeyPath)
 		if err != nil {
 			log.WithError(err).Fatal("Failed to initialize wireguard")
 		}

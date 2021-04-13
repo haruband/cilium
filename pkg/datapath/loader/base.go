@@ -55,8 +55,6 @@ const (
 	initArgDevices
 	initArgHostDev1
 	initArgHostDev2
-	initArgXDPDevice
-	initArgXDPMode
 	initArgMTU
 	initArgHostReachableServices
 	initArgHostReachableServicesUDP
@@ -250,14 +248,6 @@ func (l *Loader) Reinitialize(ctx context.Context, o datapath.BaseProgramOwner, 
 		return err
 	}
 
-	if option.Config.XDPDevice != "undefined" {
-		args[initArgXDPDevice] = option.Config.XDPDevice
-		args[initArgXDPMode] = option.Config.XDPMode
-	} else {
-		args[initArgXDPDevice] = "<nil>"
-		args[initArgXDPMode] = "<nil>"
-	}
-
 	if option.Config.DevicePreFilter != "undefined" {
 		scopedLog := log.WithField(logfields.XDPDevice, option.Config.XDPDevice)
 
@@ -418,9 +408,17 @@ func (l *Loader) Reinitialize(ctx context.Context, o datapath.BaseProgramOwner, 
 		}
 	}
 
-	prog := filepath.Join(option.Config.BpfDir, "init.sh")
 	ctx, cancel := context.WithTimeout(ctx, defaults.ExecTimeout)
 	defer cancel()
+
+	maybeUnloadObsoleteXDPPrograms(option.Config.XDPDevice, option.Config.XDPMode)
+	if option.Config.XDPDevice != "undefined" {
+		if err := compileAndLoadXDPProg(ctx, option.Config.XDPDevice, option.Config.XDPMode); err != nil {
+			log.WithError(err).Fatal("Failed to compile XDP program")
+		}
+	}
+
+	prog := filepath.Join(option.Config.BpfDir, "init.sh")
 	cmd := exec.CommandContext(ctx, prog, args...)
 	cmd.Env = bpf.Environment()
 	if _, err := cmd.CombinedOutput(log, true); err != nil {

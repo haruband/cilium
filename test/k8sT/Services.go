@@ -1,4 +1,4 @@
-// Copyright 2017-2020 Authors of Cilium
+// Copyright 2017-2021 Authors of Cilium
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,11 +17,15 @@ package k8sTest
 import (
 	"context"
 	"fmt"
+	"io/ioutil"
 	"net"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 	"sync"
+	"text/template"
 	"time"
 
 	. "github.com/cilium/cilium/test/ginkgo-ext"
@@ -66,7 +70,7 @@ var _ = Describe("K8sServicesTest", func() {
 		var err error
 		kubectl = helpers.CreateKubectl(helpers.K8s1VMName(), logger)
 
-		if helpers.DualStackSupported() && helpers.RunsWithKubeProxy() {
+		if helpers.DualStackSupported() && helpers.DoesNotRunWithKubeProxyReplacement() {
 			// This is a fix required for kube-proxy when running in dual-stack mode.
 			// Sometimes there is a condition where kube-proxy repeatedly fails as it is not able
 			// to find KUBE-MARK-DROP iptables chain for IPv6 which should be created by kubelet.
@@ -132,7 +136,9 @@ var _ = Describe("K8sServicesTest", func() {
 
 	manualIPv6TestingNotRequired := func(f func() bool) func() bool {
 		return func() bool {
-			return helpers.DualStackSupported() || f()
+			// IPv6 tests do not work on Integrations like GKE as we don't have IPv6
+			// addresses assigned to nodes in those environments.
+			return helpers.DualStackSupported() || helpers.GetCurrentIntegration() != "" || f()
 		}
 	}
 
@@ -355,7 +361,7 @@ var _ = Describe("K8sServicesTest", func() {
 			}
 		})
 
-		SkipItIf(helpers.RunsWithoutKubeProxy, "Checks service on same node", func() {
+		SkipItIf(helpers.RunsWithKubeProxyReplacement, "Checks service on same node", func() {
 			serviceNames := []string{serviceName}
 			if helpers.DualStackSupported() {
 				serviceNames = append(serviceNames, serviceNameIPv6)
@@ -460,7 +466,7 @@ var _ = Describe("K8sServicesTest", func() {
 
 		}, 600)
 
-		SkipContextIf(manualIPv6TestingNotRequired(helpers.RunsWithKubeProxy), "IPv6 Connectivity", func() {
+		SkipContextIf(manualIPv6TestingNotRequired(helpers.DoesNotRunWithKubeProxyReplacement), "IPv6 Connectivity", func() {
 			// Because the deployed K8s does not have dual-stack mode enabled,
 			// we install the Cilium service rules manually via Cilium CLI.
 			demoClusterIPv6 := "fd03::100"
@@ -1808,7 +1814,7 @@ Secondary Interface %s :: IPv4: (%s, %s), IPv6: (%s, %s)`, helpers.DualStackSupp
 			)
 			// Destination address and port for fragmented datagram
 			// are not DNAT-ed with kube-proxy but without bpf_sock.
-			if helpers.RunsWithKubeProxy() {
+			if helpers.DoesNotRunWithKubeProxyReplacement() {
 				ciliumPodK8s1, err := kubectl.GetCiliumPodOnNode(helpers.K8s1)
 				ExpectWithOffset(1, err).Should(BeNil(), "Cannot get cilium pod on k8s1")
 				hasDNAT = kubectl.HasHostReachableServices(ciliumPodK8s1, false, true)
@@ -1879,7 +1885,7 @@ Secondary Interface %s :: IPv4: (%s, %s), IPv6: (%s, %s)`, helpers.DualStackSupp
 			}
 		}
 
-		SkipItIf(helpers.RunsWithoutKubeProxy, "Checks ClusterIP Connectivity", func() {
+		SkipItIf(helpers.RunsWithKubeProxyReplacement, "Checks ClusterIP Connectivity", func() {
 			services := []string{testDSServiceIPv4}
 			if helpers.DualStackSupported() {
 				services = append(services, testDSServiceIPv6)
@@ -1898,7 +1904,7 @@ Secondary Interface %s :: IPv4: (%s, %s), IPv6: (%s, %s)`, helpers.DualStackSupp
 			}
 		})
 
-		SkipContextIf(manualIPv6TestingNotRequired(helpers.RunsWithKubeProxy), "IPv6 Connectivity", func() {
+		SkipContextIf(manualIPv6TestingNotRequired(helpers.DoesNotRunWithKubeProxyReplacement), "IPv6 Connectivity", func() {
 			testDSIPv6 := "fd03::310"
 
 			BeforeAll(func() {
@@ -1924,7 +1930,7 @@ Secondary Interface %s :: IPv4: (%s, %s), IPv6: (%s, %s)`, helpers.DualStackSupp
 		})
 
 		SkipContextIf(func() bool {
-			return helpers.RunsWithoutKubeProxy() || helpers.GetCurrentIntegration() != ""
+			return helpers.RunsWithKubeProxyReplacement() || helpers.GetCurrentIntegration() != ""
 		}, "IPv6 masquerading", func() {
 			var (
 				k8s2NodeIP      string
@@ -1973,7 +1979,7 @@ Secondary Interface %s :: IPv4: (%s, %s), IPv6: (%s, %s)`, helpers.DualStackSupp
 			})
 		})
 
-		SkipContextIf(helpers.RunsWithoutKubeProxy, "Tests NodePort (kube-proxy)", func() {
+		SkipContextIf(helpers.RunsWithKubeProxyReplacement, "Tests NodePort (kube-proxy)", func() {
 			SkipItIf(helpers.DoesNotRunOnNetNextOr419Kernel, "with IPSec and externalTrafficPolicy=Local", func() {
 				deploymentManager.SetKubectl(kubectl)
 				deploymentManager.Deploy(helpers.CiliumNamespace, IPSecSecret)
@@ -2002,11 +2008,7 @@ Secondary Interface %s :: IPv4: (%s, %s), IPv6: (%s, %s)`, helpers.DualStackSupp
 			})
 		})
 
-		// IPv6 tests do not work on Integrations like GKE as we don't have IPv6
-		// addresses assigned to nodes in those environments.
-		SkipContextIf(manualIPv6TestingNotRequired(func() bool {
-			return helpers.RunsWithKubeProxy() || helpers.GetCurrentIntegration() != ""
-		}), "Tests IPv6 NodePort Services", func() {
+		SkipContextIf(manualIPv6TestingNotRequired(helpers.DoesNotRunWithKubeProxyReplacement), "Tests IPv6 NodePort Services", func() {
 			var (
 				testDSIPv6 string = "fd03::310"
 				data       v1.Service
@@ -2166,7 +2168,7 @@ Secondary Interface %s :: IPv4: (%s, %s), IPv6: (%s, %s)`, helpers.DualStackSupp
 			})
 		})
 
-		SkipContextIf(helpers.RunsWithoutKubeProxy, "with L7 policy", func() {
+		SkipContextIf(helpers.RunsWithKubeProxyReplacement, "with L7 policy", func() {
 			AfterAll(func() {
 				// Explicitly ignore result of deletion of resources to avoid incomplete
 				// teardown if any step fails.
@@ -2192,13 +2194,8 @@ Secondary Interface %s :: IPv4: (%s, %s), IPv6: (%s, %s)`, helpers.DualStackSupp
 			})
 		})
 
-		SkipContextIf(
-			func() bool {
-				return helpers.DoesNotRunOnNetNextOr419Kernel() ||
-					helpers.RunsWithKubeProxy()
-			},
-			"Tests NodePort BPF", func() {
-
+		SkipContextIf(helpers.DoesNotRunWithKubeProxyReplacement, "Tests NodePort BPF",
+			func() {
 				BeforeAll(func() {
 					enableBackgroundReport = false
 				})
@@ -2240,7 +2237,7 @@ Secondary Interface %s :: IPv4: (%s, %s), IPv6: (%s, %s)`, helpers.DualStackSupp
 						testExternalIPs()
 					})
 
-					Context("With host policy", func() {
+					SkipContextIf(helpers.RunsOnGKE, "With host policy", func() {
 						var ccnpHostPolicy string
 
 						BeforeAll(func() {
@@ -2328,11 +2325,14 @@ Secondary Interface %s :: IPv4: (%s, %s), IPv6: (%s, %s)`, helpers.DualStackSupp
 				})
 
 				Context("Tests with direct routing", func() {
+
+					var directRoutingOpts = map[string]string{
+						"tunnel":               "disabled",
+						"autoDirectNodeRoutes": "true",
+					}
+
 					BeforeAll(func() {
-						DeployCiliumOptionsAndDNS(kubectl, ciliumFilename, map[string]string{
-							"tunnel":               "disabled",
-							"autoDirectNodeRoutes": "true",
-						})
+						DeployCiliumOptionsAndDNS(kubectl, ciliumFilename, directRoutingOpts)
 					})
 
 					It("Tests NodePort", func() {
@@ -2367,16 +2367,15 @@ Secondary Interface %s :: IPv4: (%s, %s), IPv6: (%s, %s)`, helpers.DualStackSupp
 						testExternalIPs()
 					})
 
-					Context("With host policy", func() {
+					SkipContextIf(helpers.RunsOnGKE, "With host policy", func() {
 						var ccnpHostPolicy string
 
 						BeforeAll(func() {
-							options := map[string]string{
+							DeployCiliumOptionsAndDNS(kubectl, ciliumFilename, map[string]string{
 								"tunnel":               "disabled",
 								"autoDirectNodeRoutes": "true",
 								"hostFirewall":         "true",
-							}
-							DeployCiliumOptionsAndDNS(kubectl, ciliumFilename, options)
+							})
 
 							ccnpHostPolicy = helpers.ManifestGet(kubectl.BasePath(), "ccnp-host-policy-nodeport-tests.yaml")
 							_, err := kubectl.CiliumPolicyAction(helpers.DefaultNamespace, ccnpHostPolicy,
@@ -2476,32 +2475,113 @@ Secondary Interface %s :: IPv4: (%s, %s), IPv6: (%s, %s)`, helpers.DualStackSupp
 						const svcName = "test-lb-with-ip"
 
 						var (
-							dummylb string
-							lbSVC   string
+							frr      string // BGP router
+							routerIP string
+
+							bgpConfigMap string
+
+							lbSVC string
 						)
 
+						applyFRRTemplate := func() string {
+							tmpl := helpers.ManifestGet(kubectl.BasePath(), "frr.yaml.tmpl")
+							content, err := os.ReadFile(tmpl)
+							ExpectWithOffset(1, err).ToNot(HaveOccurred())
+							ExpectWithOffset(1, content).ToNot(BeEmpty())
+
+							render, err := ioutil.TempFile(os.TempDir(), "frr-")
+							ExpectWithOffset(1, err).ToNot(HaveOccurred())
+							defer render.Close()
+
+							t := template.Must(template.New("").Parse(string(content)))
+							err = t.Execute(render, struct {
+								OutsideNodeName string
+								Nodes           []string
+							}{
+								OutsideNodeName: outsideNodeName,
+								Nodes:           []string{k8s1IP, k8s2IP},
+							})
+							ExpectWithOffset(1, err).ToNot(HaveOccurred())
+
+							path, err := filepath.Abs(render.Name())
+							ExpectWithOffset(1, err).ToNot(HaveOccurred())
+							return path
+						}
+
+						applyBGPCMTemplate := func(ip string) string {
+							tmpl := helpers.ManifestGet(kubectl.BasePath(), "bgp-configmap.yaml.tmpl")
+							content, err := os.ReadFile(tmpl)
+							ExpectWithOffset(1, err).ToNot(HaveOccurred())
+							ExpectWithOffset(1, content).ToNot(BeEmpty())
+
+							render, err := ioutil.TempFile(os.TempDir(), "bgp-cm-")
+							ExpectWithOffset(1, err).ToNot(HaveOccurred())
+							defer render.Close()
+
+							t := template.Must(template.New("").Parse(string(content)))
+							err = t.Execute(render, struct {
+								RouterIP string
+							}{
+								RouterIP: ip,
+							})
+							ExpectWithOffset(1, err).ToNot(HaveOccurred())
+
+							path, err := filepath.Abs(render.Name())
+							ExpectWithOffset(1, err).ToNot(HaveOccurred())
+							return path
+						}
+
 						BeforeAll(func() {
-							DeployCiliumAndDNS(kubectl, ciliumFilename)
-							dummylb = helpers.ManifestGet(kubectl.BasePath(), "dummylb.yaml")
-							kubectl.ApplyDefault(dummylb).ExpectSuccess("Unable to apply %s", dummylb)
+							frr = applyFRRTemplate()
+							kubectl.ApplyDefault(frr).ExpectSuccess("Unable to apply rendered tempplate %s", frr)
+
+							Eventually(func() string {
+								frrPod, err := kubectl.GetPodsIPs(helpers.KubeSystemNamespace, "app=frr")
+								if _, ok := frrPod["frr"]; err != nil || !ok {
+									return ""
+								}
+								routerIP = frrPod["frr"]
+								return routerIP
+							}, 30*time.Second, 1*time.Second).Should(Not(BeEmpty()), "BGP router is not ready")
+
+							bgpConfigMap = applyBGPCMTemplate(routerIP)
+							kubectl.ApplyDefault(bgpConfigMap).ExpectSuccess("Unable to apply BGP ConfigMap %s", bgpConfigMap)
+
+							RedeployCiliumWithMerge(kubectl, ciliumFilename, directRoutingOpts,
+								map[string]string{
+									"bgp.enabled":                 "true",
+									"bgp.announce.loadbalancerIP": "true",
+								})
+
 							lbSVC = helpers.ManifestGet(kubectl.BasePath(), "test_lb_with_ip.yaml")
 							kubectl.ApplyDefault(lbSVC).ExpectSuccess("Unable to apply %s", lbSVC)
 						})
 
 						AfterAll(func() {
-							kubectl.Delete(dummylb)
+							kubectl.Delete(frr)
+							kubectl.Delete(bgpConfigMap)
 							kubectl.Delete(lbSVC)
+							// Delete temp files
+							os.Remove(frr)
+							os.Remove(bgpConfigMap)
 						})
 
 						It("Connectivity to endpoint via LB", func() {
-							// Wait until dummyLB has assigned the LB IP addr
+							By("Waiting until the Operator has assigned the LB IP")
 							lbIP, err := kubectl.GetLoadBalancerIP(
 								helpers.DefaultNamespace, svcName, 30*time.Second)
-							Expect(err).Should(BeNil(), "Cannot retrieve loadbalancer IP for test-lb")
-							// Add route to the LB IP addr via k8s1 node
-							kubectl.AddIPRoute(outsideNodeName, lbIP, k8s1IP, false).
-								ExpectSuccess("Cannot add ip route")
-							defer func() { kubectl.DelIPRoute(outsideNodeName, lbIP, k8s1IP) }()
+							Expect(err).Should(BeNil(), "Cannot retrieve LB IP for test-lb")
+
+							By("Waiting until the Agents have announced the LB IP via BGP")
+							Eventually(func() string {
+								return kubectl.ExecInHostNetNS(
+									context.TODO(),
+									outsideNodeName,
+									"ip route",
+								).GetStdOut().String()
+							}, 30*time.Second, 1*time.Second).Should(ContainSubstring(lbIP),
+								"BGP router does not have route for LB IP")
+
 							// Check connectivity from outside
 							url := "http://" + lbIP
 							testCurlFromOutside(url, 10, false)
@@ -2524,16 +2604,13 @@ Secondary Interface %s :: IPv4: (%s, %s), IPv6: (%s, %s)`, helpers.DualStackSupp
 				})
 
 				SkipContextIf(func() bool { return helpers.DoesNotRunOnNetNextKernel() || helpers.DoesNotExistNodeWithoutCilium() },
-					"Tests with Wireguard tunnel to outside (L2-less, kube-wireguarder)", func() {
-						// This tests a case when Wireguard tunnel is established with a client
-						// located outside of the cluster. For this, we use kube-wireguarder, as the
-						// native Cilium implementation cannot be used to establish tunnels with
-						// nodes which are not managed by Cilium.
-
+					"Tests L2-less with Wireguard provisioned via kube-wireguarder", func() {
 						var wgYAML string
 
 						BeforeAll(func() {
-							// kube-wireguarder set ups wireguard tunnels
+							// kube-wireguarder will setup wireguard tunnels and patch CiliumNode
+							// objects so that wg IP addrs will be used for pod direct routing
+							// routes.
 							wgYAML = helpers.ManifestGet(kubectl.BasePath(), "kube-wireguarder.yaml")
 							res := kubectl.ApplyDefault(wgYAML)
 							Expect(res).Should(helpers.CMDSuccess(), "unable to apply %s", wgYAML)
@@ -2559,13 +2636,14 @@ Secondary Interface %s :: IPv4: (%s, %s), IPv6: (%s, %s)`, helpers.DualStackSupp
 							err := kubectl.Get(helpers.DefaultNamespace, "service test-nodeport").Unmarshal(&data)
 							Expect(err).Should(BeNil(), "Cannot retrieve service")
 
-							By("SNAT with direct routing device private")
+							By("SNAT with direct routing device wg0")
 
 							DeployCiliumOptionsAndDNS(kubectl, ciliumFilename, map[string]string{
 								"devices":                      fmt.Sprintf(`'{%s,%s}'`, privateIface, "wg0"),
-								"nodePort.directRoutingDevice": privateIface,
+								"nodePort.directRoutingDevice": "wg0",
 								"tunnel":                       "disabled",
 								"autoDirectNodeRoutes":         "true",
+								"bpf.masquerade":               "false",
 							})
 
 							// Test via k8s1 private iface
@@ -2573,6 +2651,38 @@ Secondary Interface %s :: IPv4: (%s, %s), IPv6: (%s, %s)`, helpers.DualStackSupp
 							testCurlFromOutside(url, 10, false)
 							// Test via k8s1 wg0 iface
 							wgK8s1IPv4 := getIPv4AddrForIface(k8s1NodeName, "wg0")
+							url = getHTTPLink(wgK8s1IPv4, data.Spec.Ports[0].NodePort)
+							testCurlFromOutside(url, 10, false)
+
+							// DSR when direct routing device is wg0 does not make
+							// much sense, as all possible client IPs should be specified
+							// in wg's allowed IPs on k8s2. Otherwise, a forwarded
+							// request with the original client IP by k8s1 will be
+							// dropped by k8s2. Therefore, we are not testing such
+							// case.
+
+							// Disable setting direct routes via kube-wireguarder, as non-wg device
+							// is going to be used for direct routing.
+							res := kubectl.Patch(helpers.KubeSystemNamespace, "configmap", "kube-wireguarder-config",
+								`{"data":{"setup-direct-routes": "false"}}`)
+							res.ExpectSuccess("Failed to patch kube-wireguarder-config")
+							res = kubectl.DeleteResource("pod", "-n "+helpers.KubeSystemNamespace+" -l app=kube-wireguarder --wait=true")
+							res.ExpectSuccess("Failed to delete kube-wireguarder pods")
+
+							By("SNAT with direct routing device private")
+
+							DeployCiliumOptionsAndDNS(kubectl, ciliumFilename, map[string]string{
+								"devices":                      fmt.Sprintf(`'{%s,%s}'`, privateIface, "wg0"),
+								"nodePort.directRoutingDevice": privateIface,
+								"tunnel":                       "disabled",
+								"autoDirectNodeRoutes":         "true",
+								"bpf.masquerade":               "false",
+							})
+
+							// Test via k8s1 private iface
+							url = getHTTPLink(k8s1IP, data.Spec.Ports[0].NodePort)
+							testCurlFromOutside(url, 10, false)
+							// Test via k8s1 wg0 iface
 							url = getHTTPLink(wgK8s1IPv4, data.Spec.Ports[0].NodePort)
 							testCurlFromOutside(url, 10, false)
 
@@ -2593,57 +2703,8 @@ Secondary Interface %s :: IPv4: (%s, %s), IPv6: (%s, %s)`, helpers.DualStackSupp
 							// Sending over k8s1 wg0 iface won't work, as a DSR reply
 							// from k8s2 to k8s3 (client) will have a src IP of k8s1
 							// wg0 iface. Because there cannot be overlapping allowed
-							// IPs, we cannot configure Wireguard for such cases.
+							// IPs, we cannot configure wireguard for such cases.
 						})
-					})
-
-				SkipContextIf(func() bool { return helpers.DoesNotRunOnNetNextKernel() || helpers.DoesNotExistNodeWithoutCilium() },
-					"Tests with Wireguard tunnel used for direct routing (L2-less, native)", func() {
-						// This tests a case when Wireguard tunnel is used among
-						// Cilium nodes for direct routing. For this case we can
-						// use the Cilium's native Wireguard implementation.
-
-						It("Tests NodePort SNAT from outside", func() {
-							var data v1.Service
-							err := kubectl.Get(helpers.DefaultNamespace, "service test-nodeport").Unmarshal(&data)
-							Expect(err).Should(BeNil(), "Cannot retrieve service")
-
-							DeployCiliumOptionsAndDNS(kubectl, ciliumFilename, map[string]string{
-								"tunnel":               "disabled",
-								"autoDirectNodeRoutes": "true",
-								"wireguard.enabled":    "true",
-								"l7Proxy":              "false",
-							})
-
-							// Run tcpdump on k8s1 to check whether we don't forward any unencrypted
-							// request to the service pod running on k8s2. We listen on the "privateIface"
-							// which previously (before enabling Wireguard) has been used to forward
-							// NodePort BPF requests to a remote node.
-							// "--immediate-mode" is to prevent tcpdump from buffering packets, while
-							// "-c 1" captures only one packet (it's enough, as we expect that no
-							// unencrypted packet is being forwarded).
-							_, dstPodIPK8s2 := kubectl.GetPodOnNodeLabeledWithOffset(helpers.K8s2, testDS, 1)
-							podPort := data.Spec.Ports[0].TargetPort.String()
-							cmd := fmt.Sprintf("tcpdump -i %s --immediate-mode -n 'host %s and port %s' -c 1", privateIface, dstPodIPK8s2, podPort)
-							res, cancel, err := kubectl.ExecInHostNetNSInBackground(context.TODO(), k8s1NodeName, cmd)
-							Expect(err).Should(BeNil(), "Cannot exec tcpdump in bg")
-
-							url := getHTTPLink(k8s1IP, data.Spec.Ports[0].NodePort)
-							testCurlFromOutside(url, 10, false)
-
-							cancel()
-							// We don't expect any packet to match the tcpdump filter. Otherwise, we would
-							// leak unencrypted packets.
-							Expect(strings.Contains(res.CombineOutput().String(), "1 packet captured")).Should(Equal(false))
-
-							// DSR when direct routing device is wg0 does not make
-							// much sense, as all possible client IPs should be specified
-							// in wg's allowed IPs on k8s2. Otherwise, a forwarded
-							// request with the original client IP by k8s1 will be
-							// dropped by k8s2. Therefore, we are not testing such
-							// case.
-						})
-
 					})
 
 				SkipItIf(func() bool {

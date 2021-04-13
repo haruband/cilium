@@ -50,12 +50,6 @@ var (
 	log = logging.DefaultLogger.WithField(logfields.LogSubsys, "config")
 )
 
-type FlagsSection struct {
-	Name  string   // short one-liner to describe the section
-	Desc  string   // optional paragraph to explain a section
-	Flags []string // names of flags to include in the section
-}
-
 const (
 	// AgentHealthPort is the TCP port for the agent health status API.
 	AgentHealthPort = "agent-health-port"
@@ -213,6 +207,9 @@ const (
 
 	// K8sSyncTimeout is the timeout to synchronize all resources with k8s.
 	K8sSyncTimeoutName = "k8s-sync-timeout"
+
+	// AllocatorListTimeout is the timeout to list initial allocator state.
+	AllocatorListTimeoutName = "allocator-list-timeout"
 
 	// KeepConfig when restoring state, keeps containers' configuration in place
 	KeepConfig = "keep-config"
@@ -668,12 +665,6 @@ const (
 	// EnableWireguard is the name of the option to enable wireguard
 	EnableWireguard = "enable-wireguard"
 
-	// WireguardSubnetV4 is the name of the option to set the wireguard v4 subnet
-	WireguardSubnetV4 = "wireguard-subnet-v4"
-
-	// WireguardSubnetV6 is the name of the option to set the wireguard v6 subnet
-	WireguardSubnetV6 = "wireguard-subnet-v6"
-
 	// KVstoreLeaseTTL is the time-to-live for lease in kvstore.
 	KVstoreLeaseTTL = "kvstore-lease-ttl"
 
@@ -872,6 +863,20 @@ const (
 	// HubbleMetrics specifies enabled metrics and their configuration options.
 	HubbleMetrics = "hubble-metrics"
 
+	// HubbleExportFilePath specifies the filepath to write Hubble events to.
+	// e.g. "/var/run/cilium/hubble/events.log"
+	HubbleExportFilePath = "hubble-export-file-path"
+
+	// HubbleExportFileMaxSizeMB specifies the file size in MB at which to rotate
+	// the Hubble export file.
+	HubbleExportFileMaxSizeMB = "hubble-export-file-max-size-mb"
+
+	// HubbleExportFileMaxBacks specifies the number of rotated files to keep.
+	HubbleExportFileMaxBackups = "hubble-export-file-max-backups"
+
+	// HubbleExportFileCompress specifies whether rotated files are compressed.
+	HubbleExportFileCompress = "hubble-export-file-compress"
+
 	// DisableIptablesFeederRules specifies which chains will be excluded
 	// when installing the feeder rules
 	DisableIptablesFeederRules = "disable-iptables-feeder-rules"
@@ -934,292 +939,14 @@ const (
 	// EnableCustomCallsName is the name of the option to enable tail calls
 	// for user-defined custom eBPF programs.
 	EnableCustomCallsName = "enable-custom-calls"
-)
 
-// HelpFlagSections to format the Cilium Agent help template.
-// Developers please make sure to add the new flags to
-// the respective sections or create a new section.
-var HelpFlagSections = []FlagsSection{
-	{
-		Name: "BPF flags",
-		Flags: []string{
-			BPFRoot,
-			CTMapEntriesGlobalTCPName,
-			CTMapEntriesGlobalAnyName,
-			CTMapEntriesTimeoutSYNName,
-			CTMapEntriesTimeoutFINName,
-			CTMapEntriesTimeoutTCPName,
-			CTMapEntriesTimeoutAnyName,
-			CTMapEntriesTimeoutSVCTCPName,
-			CTMapEntriesTimeoutSVCAnyName,
-			NATMapEntriesGlobalName,
-			NeighMapEntriesGlobalName,
-			SockRevNatEntriesName,
-			PolicyMapEntriesName,
-			MapEntriesGlobalDynamicSizeRatioName,
-			PreAllocateMapsName,
-			BPFCompileDebugName,
-			FragmentsMapEntriesName,
-			EnableBPFClockProbe,
-			EnableBPFMasquerade,
-			EnableIdentityMark,
-			EnableBPFBypassFIBLookup,
-			LBMapEntriesName,
-			EnableCustomCallsName,
-		},
-	},
-	{
-		Name: "DNS policy flags",
-		Flags: []string{
-			DNSMaxIPsPerRestoredRule,
-			FQDNRejectResponseCode,
-			ToFQDNsMaxIPsPerHost,
-			ToFQDNsMinTTL,
-			ToFQDNsPreCache,
-			ToFQDNsProxyPort,
-			FQDNProxyResponseMaxDelay,
-			ToFQDNsEnableDNSCompression,
-			ToFQDNsMaxDeferredConnectionDeletes,
-			ToFQDNsIdleConnectionGracePeriod,
-		},
-	},
-	{
-		Name: "Kubernetes flags",
-		Flags: []string{
-			K8sAPIServer,
-			K8sKubeConfigPath,
-			K8sNamespaceName,
-			K8sRequireIPv4PodCIDRName,
-			K8sRequireIPv6PodCIDRName,
-			K8sSyncTimeoutName,
-			K8sWatcherEndpointSelector,
-			K8sEventHandover,
-			AnnotateK8sNode,
-			K8sForceJSONPatch,
-			DisableCiliumEndpointCRDName,
-			K8sHeartbeatTimeout,
-			K8sEnableEndpointSlice,
-			K8sEnableAPIDiscovery,
-			EnableHostPort,
-			AutoCreateCiliumNodeResource,
-			DisableCNPStatusUpdates,
-			ReadCNIConfiguration,
-			WriteCNIConfigurationWhenReady,
-			EndpointStatus,
-			SkipCRDCreation,
-			FlannelMasterDevice,
-			FlannelUninstallOnExit,
-			EnableWellKnownIdentities,
-			K8sServiceProxyName,
-			JoinClusterName,
-		},
-	},
-	{
-		Name: "Clustermesh flags",
-		Flags: []string{
-			ClusterIDName,
-			ClusterName,
-			ClusterMeshConfigName,
-		},
-	},
-	{
-		Name: "Route flags",
-		Flags: []string{
-			SingleClusterRouteName,
-			EnableEndpointRoutes,
-			EnableLocalNodeRoute,
-			EnableAutoDirectRoutingName,
-			LocalRouterIP,
-		},
-	},
-	{
-		Name: "Proxy flags",
-		Flags: []string{
-			HTTPIdleTimeout,
-			HTTPMaxGRPCTimeout,
-			HTTPRequestTimeout,
-			HTTPRetryCount,
-			HTTPRetryTimeout,
-			ProxyConnectTimeout,
-			ProxyPrometheusPort,
-			SidecarIstioProxyImage,
-		},
-	},
-	{
-		Name: "Debug, logging and trace flags",
-		Flags: []string{
-			DebugArg,
-			DebugVerbose,
-			EnableTracing,
-			LogDriver,
-			LogOpt,
-			LogSystemLoadConfigName,
-			EnvoyLog,
-			EnableEndpointHealthChecking,
-			EnableHealthChecking,
-			TracePayloadlen,
-			PProf,
-			PProfPort,
-		},
-	},
-	{
-		Name: "Metrics and monitoring flags",
-		Flags: []string{
-			Metrics,
-			MonitorAggregationName,
-			MonitorAggregationFlags,
-			MonitorAggregationInterval,
-			MonitorQueueSizeName,
-			PrometheusServeAddr,
-		},
-	},
-	{
-		Name: "IP flags",
-		Flags: []string{
-			EnableIPv4Name,
-			EnableIPv6Name,
-			EnableIPv6NDPName,
-			IPAllocationTimeout,
-			IPAM,
-			IPv4NodeAddr,
-			IPv6NodeAddr,
-			IPv4PodSubnets,
-			IPv6PodSubnets,
-			IPv4Range,
-			IPv6Range,
-			LoopbackIPv4,
-			IPv4ServiceRange,
-			IPv6ServiceRange,
-			IPv6ClusterAllocCIDRName,
-			IPv6MCastDevice,
-			MTUName,
-			NAT46Range,
-			EnableIPv4FragmentsTrackingName,
-		},
-	},
-	{
-		Name: "KVstore flags",
-		Flags: []string{
-			KVStore,
-			KVStoreOpt,
-			KVstoreConnectivityTimeout,
-			KVstorePeriodicSync,
-		},
-	},
-	{
-		Name: "Encryption flags",
-		Flags: []string{
-			EncryptInterface,
-			EncryptNode,
-			EnableIPSecName,
-			IPSecKeyFileName,
-		},
-	},
-	{
-		Name: "Policy flags",
-		Flags: []string{
-			AllowLocalhost,
-			AllowICMPFragNeeded,
-			EnablePolicy,
-			ExcludeLocalAddress,
-			ForceLocalPolicyEvalAtSource,
-			PolicyQueueSize,
-			PolicyAuditModeArg,
-			EnableL7Proxy,
-			IdentityAllocationMode,
-			IdentityChangeGracePeriod,
-			FixedIdentityMapping,
-			CertsDirectory,
-			EnableHostFirewall,
-		},
-	},
-	{
-		Name: "Hubble flags",
-		Flags: []string{
-			EnableHubble,
-			HubbleSocketPath,
-			HubbleListenAddress,
-			HubbleTLSDisabled,
-			HubbleTLSCertFile,
-			HubbleTLSKeyFile,
-			HubbleTLSClientCAFiles,
-			HubbleFlowBufferSize,
-			HubbleEventBufferCapacity,
-			HubbleEventQueueSize,
-			HubbleMetricsServer,
-			HubbleMetrics,
-		},
-	},
-	{
-		Name: "Services and address translation flags",
-		Flags: []string{
-			EgressMasqueradeInterfaces,
-			Masquerade,
-			EnableIPv4Masquerade,
-			EnableIPv6Masquerade,
-			NodePortRange,
-			EnableHostReachableServices,
-			HostReachableServicesProtos,
-			EnableSessionAffinity,
-		},
-	},
-	{
-		Name: "IPtables flags",
-		Flags: []string{
-			PrependIptablesChainsName,
-			DisableIptablesFeederRules,
-			InstallIptRules,
-			IPTablesLockTimeout,
-			IPTablesRandomFully,
-		},
-	},
-	{
-		Name: "Networking flags",
-		Flags: []string{
-			DatapathMode,
-			ConntrackGCInterval,
-			DisableConntrack,
-			EnableAutoProtectNodePortRange,
-			TunnelName,
-			SockopsEnableName,
-			PrefilterDevice,
-			PrefilterMode,
-			EnableXTSocketFallbackName,
-			IpvlanMasterDevice,
-			EnableWireguard,
-			WireguardSubnetV4,
-			WireguardSubnetV6,
-		},
-	},
-	{
-		Name: "KubeProxy free flags",
-		Flags: []string{
-			KubeProxyReplacement,
-			EnableNodePort,
-			EnableSVCSourceRangeCheck,
-			EnableHostReachableServices,
-			EnableExternalIPs,
-			HostReachableServicesProtos,
-			NodePortMode,
-			NodePortBindProtection,
-			NodePortAcceleration,
-		},
-	},
-	{
-		Name: "Path and config file flags",
-		Flags: []string{
-			CompilerFlags,
-			ConfigFile,
-			ConfigDir,
-			CGroupRoot,
-			IPMasqAgentConfigPath,
-			LibDir,
-			StateDir,
-			SocketPath,
-			LabelPrefixFile,
-		},
-	},
-}
+	// BGPAnnounceLBIP announces service IPs of type LoadBalancer via BGP
+	BGPAnnounceLBIP = "bgp-announce-lb-ip"
+
+	// BGPConfigPath is the file path to the BGP configuration. It is
+	// compatible with MetalLB's configuration.
+	BGPConfigPath = "bgp-config-path"
+)
 
 // Default string arguments
 var (
@@ -1646,12 +1373,6 @@ type DaemonConfig struct {
 	// EnableWireguard enables Wireguard encryption
 	EnableWireguard bool
 
-	// WireguardSubnetV4 is a subnet used to allocate Wireguard tunnel IPv4 addrs
-	WireguardSubnetV4 *net.IPNet
-
-	// WireguardSubnetV6 is a subnet used to allocate Wireguard tunnel IPv6 addrs
-	WireguardSubnetV6 *net.IPNet
-
 	// MonitorQueueSize is the size of the monitor event queue
 	MonitorQueueSize int
 
@@ -1685,6 +1406,7 @@ type DaemonConfig struct {
 	K8sClientBurst                int
 	K8sClientQPSLimit             float64
 	K8sSyncTimeout                time.Duration
+	AllocatorListTimeout          time.Duration
 	K8sWatcherEndpointSelector    string
 	KVStore                       string
 	KVStoreOpt                    map[string]string
@@ -2100,6 +1822,20 @@ type DaemonConfig struct {
 	// HubbleMetrics specifies enabled metrics and their configuration options.
 	HubbleMetrics []string
 
+	// HubbleExportFilePath specifies the filepath to write Hubble events to.
+	// e.g. "/var/run/cilium/hubble/events.log"
+	HubbleExportFilePath string
+
+	// HubbleExportFileMaxSizeMB specifies the file size in MB at which to rotate
+	// the Hubble export file.
+	HubbleExportFileMaxSizeMB int
+
+	// HubbleExportFileMaxBacks specifies the number of rotated files to keep.
+	HubbleExportFileMaxBackups int
+
+	// HubbleExportFileCompress specifies whether rotated files are compressed.
+	HubbleExportFileCompress bool
+
 	// K8sHeartbeatTimeout configures the timeout for apiserver heartbeat
 	K8sHeartbeatTimeout time.Duration
 
@@ -2161,11 +1897,6 @@ type DaemonConfig struct {
 	// available.
 	CRDWaitTimeout time.Duration
 
-	// NeedsRelaxVerifier enables the relax_verifier() helper which is used
-	// to introduce state pruning points for the verifier in the datapath
-	// program.
-	NeedsRelaxVerifier bool
-
 	// EgressMultiHomeIPRuleCompat instructs Cilium to use a new scheme to
 	// store rules and routes under ENI and Azure IPAM modes, if false.
 	// Otherwise, it will use the old scheme.
@@ -2181,6 +1912,13 @@ type DaemonConfig struct {
 	// eBPF programs, typically used to collect custom per-endpoint
 	// metrics.
 	EnableCustomCalls bool
+
+	// BGPAnnounceLBIP announces service IPs of type LoadBalancer via BGP.
+	BGPAnnounceLBIP bool
+
+	// BGPConfigPath is the file path to the BGP configuration. It is
+	// compatible with MetalLB's configuration.
+	BGPConfigPath string
 }
 
 var (
@@ -2221,6 +1959,7 @@ var (
 		EnableWellKnownIdentities:    defaults.EnableEndpointRoutes,
 		K8sEnableK8sEndpointSlice:    defaults.K8sEnableEndpointSlice,
 		k8sEnableAPIDiscovery:        defaults.K8sEnableAPIDiscovery,
+		AllocatorListTimeout:         defaults.AllocatorListTimeout,
 
 		k8sEnableLeasesFallbackDiscovery: defaults.K8sEnableLeasesFallbackDiscovery,
 		APIRateLimit:                     make(map[string]string),
@@ -2664,6 +2403,7 @@ func (c *DaemonConfig) Populate() {
 	c.K8sForceJSONPatch = viper.GetBool(K8sForceJSONPatch)
 	c.K8sEventHandover = viper.GetBool(K8sEventHandover)
 	c.K8sSyncTimeout = viper.GetDuration(K8sSyncTimeoutName)
+	c.AllocatorListTimeout = viper.GetDuration(AllocatorListTimeoutName)
 	c.K8sWatcherEndpointSelector = viper.GetString(K8sWatcherEndpointSelector)
 	c.KeepConfig = viper.GetBool(KeepConfig)
 	c.KVStore = viper.GetString(KVStore)
@@ -2733,6 +2473,8 @@ func (c *DaemonConfig) Populate() {
 	c.EnableBPFBypassFIBLookup = viper.GetBool(EnableBPFBypassFIBLookup)
 	c.InstallNoConntrackIptRules = viper.GetBool(InstallNoConntrackIptRules)
 	c.EnableCustomCalls = viper.GetBool(EnableCustomCallsName)
+	c.BGPAnnounceLBIP = viper.GetBool(BGPAnnounceLBIP)
+	c.BGPConfigPath = viper.GetString(BGPConfigPath)
 
 	err = c.populateMasqueradingSettings()
 	if err != nil {
@@ -2903,22 +2645,6 @@ func (c *DaemonConfig) Populate() {
 
 	c.KubeProxyReplacementHealthzBindAddr = viper.GetString(KubeProxyReplacementHealthzBindAddr)
 
-	if subnetV4 := viper.GetString(WireguardSubnetV4); subnetV4 != "" {
-		_, ipv4net, err := net.ParseCIDR(subnetV4)
-		if err != nil {
-			log.WithError(err).Fatalf("Failed to parse wireguard IPv4 subnet: %s", subnetV4)
-		}
-		c.WireguardSubnetV4 = ipv4net
-	}
-
-	if subnetV6 := viper.GetString(WireguardSubnetV6); subnetV6 != "" {
-		_, ipv6net, err := net.ParseCIDR(subnetV6)
-		if err != nil {
-			log.WithError(err).Fatalf("Failed to parse wireguard IPv6 subnet: %s", subnetV6)
-		}
-		c.WireguardSubnetV6 = ipv6net
-	}
-
 	// Hubble options.
 	c.EnableHubble = viper.GetBool(EnableHubble)
 	c.HubbleSocketPath = viper.GetString(HubbleSocketPath)
@@ -2935,6 +2661,10 @@ func (c *DaemonConfig) Populate() {
 	}
 	c.HubbleMetricsServer = viper.GetString(HubbleMetricsServer)
 	c.HubbleMetrics = viper.GetStringSlice(HubbleMetrics)
+	c.HubbleExportFilePath = viper.GetString(HubbleExportFilePath)
+	c.HubbleExportFileMaxSizeMB = viper.GetInt(HubbleExportFileMaxSizeMB)
+	c.HubbleExportFileMaxBackups = viper.GetInt(HubbleExportFileMaxBackups)
+	c.HubbleExportFileCompress = viper.GetBool(HubbleExportFileCompress)
 	c.DisableIptablesFeederRules = viper.GetStringSlice(DisableIptablesFeederRules)
 
 	// Hidden options

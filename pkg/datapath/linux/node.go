@@ -34,7 +34,6 @@ import (
 	"github.com/cilium/cilium/pkg/maps/neighborsmap"
 	"github.com/cilium/cilium/pkg/maps/tunnel"
 	"github.com/cilium/cilium/pkg/metrics"
-	"github.com/cilium/cilium/pkg/node/addressing"
 	nodeTypes "github.com/cilium/cilium/pkg/node/types"
 	"github.com/cilium/cilium/pkg/option"
 
@@ -679,14 +678,13 @@ func (n *linuxNodeHandler) insertNeighbor(ctx context.Context, newNode *nodeType
 	copy(nextHopIPv4, newNodeIP)
 
 	scopedLog := log.WithFields(logrus.Fields{
-		logfields.LogSubsys: "node-neigh",
+		logfields.LogSubsys: "node-neigh-debug",
 		logfields.Interface: n.neighDiscoveryLink.Attrs().Name,
-		logfields.IPAddr:    newNodeIP,
 	})
 
 	srcIPv4, nextHopIPv4, err := n.getSrcAndNextHopIPv4(nextHopIPv4)
 	if err != nil {
-		scopedLog.WithError(err).Error("Failed to determine source and nexthop IP addr")
+		scopedLog.WithError(err).Info("Unable to determine source and nexthop IP addr")
 		return
 	}
 
@@ -713,7 +711,7 @@ func (n *linuxNodeHandler) insertNeighbor(ctx context.Context, newNode *nodeType
 						logfields.IPAddr:       neigh.IP,
 						logfields.HardwareAddr: neigh.HardwareAddr,
 						logfields.LinkIndex:    neigh.LinkIndex,
-					}).WithError(err).Warn("Failed to remove neighbor entry")
+					}).WithError(err).Info("Unable to remove neighbor entry")
 				}
 				delete(n.neighByNextHop, nextHopStr)
 				if option.Config.NodePortHairpin {
@@ -734,7 +732,7 @@ func (n *linuxNodeHandler) insertNeighbor(ctx context.Context, newNode *nodeType
 	if nextHopIsNew || refresh {
 		hwAddr, err := arp.PingOverLink(n.neighDiscoveryLink, srcIPv4, nextHopIPv4)
 		if err != nil {
-			scopedLog.WithError(err).Error("arping failed")
+			scopedLog.WithError(err).Info("arping failed")
 			metrics.ArpingRequestsTotal.WithLabelValues(failed).Inc()
 			return
 		}
@@ -771,7 +769,7 @@ func (n *linuxNodeHandler) insertNeighbor(ctx context.Context, newNode *nodeType
 		default:
 		}
 		if err := netlink.NeighSet(&neigh); err != nil {
-			scopedLog.WithError(err).Error("Failed to insert neighbor")
+			scopedLog.WithError(err).Info("Unable to insert neighbor")
 			return
 		}
 		n.neighByNextHop[nextHopStr] = &neigh
@@ -802,11 +800,11 @@ func (n *linuxNodeHandler) deleteNeighbor(oldNode *nodeTypes.Node) {
 		if found {
 			if err := netlink.NeighDel(neigh); err != nil {
 				log.WithFields(logrus.Fields{
-					logfields.LogSubsys:    "node-neigh",
+					logfields.LogSubsys:    "node-neigh-debug",
 					logfields.IPAddr:       neigh.IP,
 					logfields.HardwareAddr: neigh.HardwareAddr,
 					logfields.LinkIndex:    neigh.LinkIndex,
-				}).WithError(err).Warn("Failed to remove neighbor entry")
+				}).WithError(err).Info("Unable to remove neighbor entry")
 				return
 			}
 
@@ -927,8 +925,6 @@ func (n *linuxNodeHandler) nodeUpdate(oldNode, newNode *nodeTypes.Node, firstAdd
 
 	if option.Config.EnableWireguard {
 		var podCIDRv4, podCIDRv6 *net.IPNet
-		wgIPv4 := newNode.GetIPByType(addressing.NodeWireguardIP, false)
-		wgIPv6 := newNode.GetIPByType(addressing.NodeWireguardIP, true)
 		if newNode.IPv4AllocCIDR != nil {
 			podCIDRv4 = newNode.IPv4AllocCIDR.IPNet
 		}
@@ -936,7 +932,7 @@ func (n *linuxNodeHandler) nodeUpdate(oldNode, newNode *nodeTypes.Node, firstAdd
 			podCIDRv6 = newNode.IPv6AllocCIDR.IPNet
 		}
 		if err := n.wgAgent.UpdatePeer(newNode.Name, newNode.WireguardPubKey,
-			wgIPv4, newIP4, podCIDRv4, wgIPv6, newIP6, podCIDRv6); err != nil {
+			newIP4, podCIDRv4, newIP6, podCIDRv6); err != nil {
 			log.WithError(err).
 				WithField(logfields.NodeName, newNode.Name).
 				Warning("Failed to update wireguard configuration for peer")

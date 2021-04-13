@@ -27,6 +27,7 @@ import (
 	"github.com/cilium/cilium/api/v1/models"
 	health "github.com/cilium/cilium/cilium-health/launch"
 	"github.com/cilium/cilium/pkg/bandwidth"
+	"github.com/cilium/cilium/pkg/bgp/speaker"
 	"github.com/cilium/cilium/pkg/bpf"
 	"github.com/cilium/cilium/pkg/cgroups"
 	"github.com/cilium/cilium/pkg/clustermesh"
@@ -40,6 +41,7 @@ import (
 	datapathOption "github.com/cilium/cilium/pkg/datapath/option"
 	"github.com/cilium/cilium/pkg/debug"
 	"github.com/cilium/cilium/pkg/defaults"
+	"github.com/cilium/cilium/pkg/egresspolicy"
 	"github.com/cilium/cilium/pkg/endpoint"
 	"github.com/cilium/cilium/pkg/endpoint/regeneration"
 	"github.com/cilium/cilium/pkg/endpointmanager"
@@ -172,6 +174,10 @@ type Daemon struct {
 	endpointCreations *endpointCreationManager
 
 	redirectPolicyManager *redirectpolicy.Manager
+
+	bgpSpeaker *speaker.Speaker
+
+	egressPolicyManager *egresspolicy.Manager
 
 	apiLimiterSet *rate.APILimiterSet
 
@@ -380,6 +386,11 @@ func NewDaemon(ctx context.Context, cancel context.CancelFunc, epMgr *endpointma
 	d.endpointManager.InitMetrics()
 
 	d.redirectPolicyManager = redirectpolicy.NewRedirectPolicyManager(d.svc)
+	if option.Config.BGPAnnounceLBIP {
+		d.bgpSpeaker = speaker.New()
+	}
+
+	d.egressPolicyManager = egresspolicy.NewEgressPolicyManager()
 
 	d.k8sWatcher = watchers.NewK8sWatcher(
 		d.endpointManager,
@@ -389,11 +400,16 @@ func NewDaemon(ctx context.Context, cancel context.CancelFunc, epMgr *endpointma
 		d.svc,
 		d.datapath,
 		d.redirectPolicyManager,
+		d.bgpSpeaker,
+		d.egressPolicyManager,
 		option.Config,
 	)
 
 	d.redirectPolicyManager.RegisterSvcCache(&d.k8sWatcher.K8sSvcCache)
 	d.redirectPolicyManager.RegisterGetStores(d.k8sWatcher)
+	if option.Config.BGPAnnounceLBIP {
+		d.bgpSpeaker.RegisterSvcCache(&d.k8sWatcher.K8sSvcCache)
+	}
 
 	bootstrapStats.daemonInit.End(true)
 
@@ -515,7 +531,7 @@ func NewDaemon(ctx context.Context, cancel context.CancelFunc, epMgr *endpointma
 			return nil, restoredEndpoints, err
 		}
 
-		if option.Config.IPAM == ipamOption.IPAMClusterPool || option.Config.EnableWireguard {
+		if option.Config.IPAM == ipamOption.IPAMClusterPool {
 			// Create the CiliumNode custom resource. This call will block until
 			// the custom resource has been created
 			d.nodeDiscovery.UpdateCiliumNodeResource()

@@ -44,7 +44,6 @@ import (
 	"github.com/cilium/cilium/pkg/rand"
 	"github.com/cilium/cilium/pkg/rate"
 	"github.com/cilium/cilium/pkg/version"
-	wireguard "github.com/cilium/cilium/pkg/wireguard/operator"
 
 	gops "github.com/google/gops/agent"
 	"github.com/sirupsen/logrus"
@@ -133,7 +132,9 @@ func initEnv() {
 	logging.DefaultLogger.Hooks.Add(metrics.NewLoggingHook(components.CiliumOperatortName))
 
 	// Logging should always be bootstrapped first. Do not add any code above this!
-	logging.SetupLogging(option.Config.LogDriver, logging.LogOptions(option.Config.LogOpt), binaryName, option.Config.Debug)
+	if err := logging.SetupLogging(option.Config.LogDriver, logging.LogOptions(option.Config.LogOpt), binaryName, option.Config.Debug); err != nil {
+		log.Fatal(err)
+	}
 
 	option.LogRegisteredOptions(log)
 	// Enable fallback to direct API probing to check for support of Leases in
@@ -362,19 +363,8 @@ func onOperatorStartLeading(ctx context.Context) {
 
 	var (
 		nodeManager *allocator.NodeEventHandler
-		wgOperator  *wireguard.Operator
 		err         error
 	)
-
-	if option.Config.EnableWireguard {
-		wgOperator, err = wireguard.NewOperator(
-			option.Config.WireguardSubnetV4,
-			option.Config.WireguardSubnetV6,
-			&ciliumNodeUpdateImplementation{})
-		if err != nil {
-			log.WithError(err).Fatal("Failed to create wireguard operator")
-		}
-	}
 
 	log.WithField(logfields.Mode, option.Config.IPAM).Info("Initializing IPAM")
 
@@ -394,7 +384,7 @@ func onOperatorStartLeading(ctx context.Context) {
 			log.WithError(err).Fatalf("Unable to start %s allocator", ipamMode)
 		}
 
-		startSynchronizingCiliumNodes(nm, wgOperator)
+		startSynchronizingCiliumNodes(nm)
 		nodeManager = &nm
 
 		switch ipamMode {
@@ -415,15 +405,13 @@ func onOperatorStartLeading(ctx context.Context) {
 			nm.Resync(context.Background(), time.Time{})
 		}
 	default:
-		startSynchronizingCiliumNodes(NOPNodeManager, wgOperator)
+		startSynchronizingCiliumNodes(NOPNodeManager)
 		nodeManager = &NOPNodeManager
 	}
 
-	if wgOperator != nil {
-		<-k8sCiliumNodesCacheSynced
-		if err := wgOperator.RestoreFinished(); err != nil {
-			log.WithError(err).Warn("Failed to allocate wireguard IP addrs")
-		}
+	if operatorOption.Config.BGPAnnounceLBIP {
+		log.Info("Starting LB IP allocator")
+		operatorWatchers.StartLBIPAllocator(option.Config)
 	}
 
 	if kvstoreEnabled() {

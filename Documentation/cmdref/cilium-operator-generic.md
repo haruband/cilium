@@ -11,6 +11,8 @@ cilium-operator-generic [flags]
 ### Options
 
 ```
+      --bgp-announce-lb-ip                        Announces service IPs of type LoadBalancer via BGP
+      --bgp-config-path string                    Path to file containing the BGP configuration (default "/var/lib/cilium/bgp/config.yaml")
       --cilium-endpoint-gc-interval duration      GC interval for cilium endpoints (default 5m0s)
       --cluster-id int                            Unique identifier of the cluster
       --cluster-name string                       Name of the cluster (default "default")
@@ -53,7 +55,7 @@ cilium-operator-generic [flags]
       --limit-ipam-api-burst int                  Upper burst limit when accessing external APIs (default 4)
       --limit-ipam-api-qps float                  Queries per second limit when accessing external IPAM APIs (default 20)
       --log-driver strings                        Logging endpoints to use for example syslog
-      --log-opt map                               Log driver options for cilium-operator (default map[])
+      --log-opt map                               Log driver options for cilium-operator, configmap example for syslog driver: {"syslog.level":"info","syslog.facility":"local4"} (default map[])
       --nodes-gc-interval duration                GC interval for nodes store in the kvstore (default 2m0s)
       --operator-api-serve-addr string            Address to serve API requests (default "localhost:9234")
       --operator-prometheus-serve-addr string     Address to serve Prometheus metrics (default ":6942")
@@ -66,8 +68,6 @@ cilium-operator-generic [flags]
       --synchronize-k8s-services                  Synchronize Kubernetes services to kvstore (default true)
       --unmanaged-pod-watcher-interval int        Interval to check for unmanaged kube-dns pods (0 to disable) (default 15)
       --version                                   Print version information
-      --wireguard-subnet-v4 string                Wireguard tunnel IPv4 subnet (default "172.16.43.0/24")
-      --wireguard-subnet-v6 string                Wireguard tunnel IPv6 subnet (default "fdc9:281f:04d7:9ee9::1/64")
 ```
 
 ### SEE ALSO
