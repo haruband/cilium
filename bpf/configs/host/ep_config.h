@@ -1,0 +1,45 @@
+#include "lib/utils.h"
+
+/* Fake values, replaced by 0 for host device and by actual values for native devices. */
+DEFINE_U32(NATIVE_DEV_IFINDEX, 0x00000001);	/* 1 */
+#define NATIVE_DEV_IFINDEX fetch_u32(NATIVE_DEV_IFINDEX)
+
+DEFINE_U32(SECCTX_FROM_IPCACHE, 0x00000001);	/* 1 */
+#define SECCTX_FROM_IPCACHE fetch_u32(SECCTX_FROM_IPCACHE)
+DEFINE_U32(HOST_EP_ID, 0x0000090e);	/* 2318 */
+#define HOST_EP_ID fetch_u32(HOST_EP_ID)
+DEFINE_MAC(NODE_MAC, 0x2, 0x0, 0x60, 0xd, 0xf0, 0xd);
+#define NODE_MAC fetch_mac(NODE_MAC)
+DEFINE_U32(SECLABEL, 0x00000002);	/* 2 */
+#define SECLABEL fetch_u32(SECLABEL)
+DEFINE_U32(SECLABEL_NB, 0x02000000);	/* 33554432 */
+#define SECLABEL_NB fetch_u32(SECLABEL_NB)
+DEFINE_U32(POLICY_VERDICT_LOG_FILTER, 0x0000ffff);	/* 65535 */
+#define POLICY_VERDICT_LOG_FILTER fetch_u32(POLICY_VERDICT_LOG_FILTER)
+#define POLICY_MAP cilium_policy_65535
+#define CALLS_MAP cilium_calls_hostns_65535
+#define FORCE_LOCAL_POLICY_EVAL_AT_SOURCE 1
+#define ENABLE_ROUTING 1
+#define HOST_ENDPOINT 1
+#define DISABLE_LOOPBACK_LB 1
+#define ENABLE_ARP_RESPONDER 1
+#define ENABLE_HOST_REDIRECT 1
+#define CT_MAP_TCP4 cilium_ct4_global
+#define CT_MAP_ANY4 cilium_ct_any4_global
+#define CT_MAP_TCP6 cilium_ct6_global
+#define CT_MAP_ANY6 cilium_ct_any6_global
+#define CT_MAP_SIZE_TCP 524288
+#define CT_MAP_SIZE_ANY 262144
+#define LOCAL_DELIVERY_METRICS 1
+#define CONNTRACK 1
+#define CONNTRACK_ACCOUNTING 1
+#undef CONNTRACK_LOCAL
+#undef DEBUG
+#undef LB_DEBUG
+#undef POLICY_DEBUG
+#define DROP_NOTIFY 1
+#undef MONITOR_AGGREGATION
+#undef ENABLE_NAT46
+#undef POLICY_AUDIT_MODE
+#define POLICY_VERDICT_NOTIFY 1
+#define TRACE_NOTIFY 1
