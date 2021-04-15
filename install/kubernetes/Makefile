@@ -8,7 +8,7 @@ HUBBLE_UI_VERSION := "v0.7.3"
 MANAGED_ETCD_VERSION := "v2.0.7"
 ETCD_VERSION := "v3.4.13"
 NODEINIT_VERSION := "62bfbe88c17778aad7bef9fa57ff9e2d4a9ba0d8"
-CERTGEN_VERSION := "v0.1.3"
+CERTGEN_VERSION := "v0.1.4"
 
 MIN_K8S_MAJOR := 1
 MIN_K8S_MINOR := 16
@@ -131,7 +131,7 @@ lint:
 	$(QUIET)helm lint --with-subcharts --values ./cilium/values.yaml ./cilium
 
 clean:
-	$(RM) $(QUICK_INSTALL) $(EXPERIMENTAL_INSTALL)
+	$(RM) $(QUICK_INSTALL) $(QUICK_HUBBLE_INSTALL) $(EXPERIMENTAL_INSTALL)
 
 docs:
 	$(QUIET)$(HELM_DOCS)
