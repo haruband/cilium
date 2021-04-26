@@ -384,16 +384,6 @@ const (
 	// Version prints the version information
 	Version = "version"
 
-	// FlannelMasterDevice installs a BPF program to allow for policy
-	// enforcement in the given network interface. Allows to run Cilium on top
-	// of other CNI plugins that provide networking, e.g. flannel, where for
-	// flannel, this value should be set with 'cni0'. [EXPERIMENTAL]")
-	FlannelMasterDevice = "flannel-master-device"
-
-	// FlannelUninstallOnExit should be used along the flannel-master-device flag,
-	// it cleans up all BPF programs installed when Cilium agent is terminated.
-	FlannelUninstallOnExit = "flannel-uninstall-on-exit"
-
 	// PProf enables serving the pprof debugging API
 	PProf = "pprof"
 
@@ -716,8 +706,11 @@ const (
 	// LoopbackIPv4 is the address to use for service loopback SNAT
 	LoopbackIPv4 = "ipv4-service-loopback-address"
 
-	// LocalRouterIP is the link-local IP address to use for Cilium router device
-	LocalRouterIP = "local-router-ip"
+	// LocalRouterIPv4 is the link-local IPv4 address to use for Cilium router device
+	LocalRouterIPv4 = "local-router-ipv4"
+
+	// LocalRouterIPv6 is the link-local IPv6 address to use for Cilium router device
+	LocalRouterIPv6 = "local-router-ipv6"
 
 	// EndpointInterfaceNamePrefix is the prefix name of the interface
 	// names shared by all endpoints
@@ -876,6 +869,16 @@ const (
 
 	// HubbleExportFileCompress specifies whether rotated files are compressed.
 	HubbleExportFileCompress = "hubble-export-file-compress"
+
+	// EnableHubbleRecorderAPI specifies if the Hubble Recorder API should be served
+	EnableHubbleRecorderAPI = "enable-hubble-recorder-api"
+
+	// HubbleRecorderStoragePath specifies the directory in which pcap files
+	// created via the Hubble Recorder API are stored
+	HubbleRecorderStoragePath = "hubble-recorder-storage-path"
+
+	// HubbleRecorderSinkQueueSize is the queue size for each recorder sink
+	HubbleRecorderSinkQueueSize = "hubble-recorder-sink-queue-size"
 
 	// DisableIptablesFeederRules specifies which chains will be excluded
 	// when installing the feeder rules
@@ -1482,14 +1485,6 @@ type DaemonConfig struct {
 	// HostDevice will be device used by Cilium to connect to the outside world.
 	HostDevice string
 
-	// FlannelMasterDevice installs a BPF program in the given interface
-	// to allow for policy enforcement mode on top of flannel.
-	FlannelMasterDevice string
-
-	// FlannelUninstallOnExit removes the BPF programs that were installed by
-	// Cilium on all interfaces created by the flannel.
-	FlannelUninstallOnExit bool
-
 	// EnableXTSocketFallback allows disabling of kernel's ip_early_demux
 	// sysctl option if `xt_socket` kernel module is not available.
 	EnableXTSocketFallback bool
@@ -1580,8 +1575,11 @@ type DaemonConfig struct {
 	// LoopbackIPv4 is the address to use for service loopback SNAT
 	LoopbackIPv4 string
 
-	// LocalRouterIP is the link-local IP address used for Cilium's router device
-	LocalRouterIP string
+	// LocalRouterIPv4 is the link-local IPv4 address used for Cilium's router device
+	LocalRouterIPv4 string
+
+	// LocalRouterIPv6 is the link-local IPv6 address used for Cilium's router device
+	LocalRouterIPv6 string
 
 	// EndpointInterfaceNamePrefix is the prefix name of the interface
 	// names shared by all endpoints
@@ -1836,6 +1834,16 @@ type DaemonConfig struct {
 	// HubbleExportFileCompress specifies whether rotated files are compressed.
 	HubbleExportFileCompress bool
 
+	// EnableHubbleRecorderAPI specifies if the Hubble Recorder API should be served
+	EnableHubbleRecorderAPI bool
+
+	// HubbleRecorderStoragePath specifies the directory in which pcap files
+	// created via the Hubble Recorder API are stored
+	HubbleRecorderStoragePath string
+
+	// HubbleRecorderSinkQueueSize is the queue size for each recorder sink
+	HubbleRecorderSinkQueueSize int
+
 	// K8sHeartbeatTimeout configures the timeout for apiserver heartbeat
 	K8sHeartbeatTimeout time.Duration
 
@@ -2070,11 +2078,6 @@ func (c *DaemonConfig) IPAMMode() string {
 // specific set of labels) is enabled.
 func (c *DaemonConfig) TracingEnabled() bool {
 	return c.Opts.IsEnabled(PolicyTracing)
-}
-
-// IsFlannelMasterDeviceSet returns if the flannel master device is set.
-func (c *DaemonConfig) IsFlannelMasterDeviceSet() bool {
-	return len(c.FlannelMasterDevice) != 0
 }
 
 // EndpointStatusIsEnabled returns true if a particular EndpointStatus* feature
@@ -2375,7 +2378,7 @@ func (c *DaemonConfig) Populate() {
 	c.EncryptNode = viper.GetBool(EncryptNode)
 	c.EnvoyLogPath = viper.GetString(EnvoyLog)
 	c.ForceLocalPolicyEvalAtSource = viper.GetBool(ForceLocalPolicyEvalAtSource)
-	c.HostDevice = getHostDevice()
+	c.HostDevice = defaults.HostDevice
 	c.HTTPIdleTimeout = viper.GetInt(HTTPIdleTimeout)
 	c.HTTPMaxGRPCTimeout = viper.GetInt(HTTPMaxGRPCTimeout)
 	c.HTTPRequestTimeout = viper.GetInt(HTTPRequestTimeout)
@@ -2419,7 +2422,8 @@ func (c *DaemonConfig) Populate() {
 	c.LogSystemLoadConfig = viper.GetBool(LogSystemLoadConfigName)
 	c.Logstash = viper.GetBool(Logstash)
 	c.LoopbackIPv4 = viper.GetString(LoopbackIPv4)
-	c.LocalRouterIP = viper.GetString(LocalRouterIP)
+	c.LocalRouterIPv4 = viper.GetString(LocalRouterIPv4)
+	c.LocalRouterIPv6 = viper.GetString(LocalRouterIPv6)
 	c.EnableBPFClockProbe = viper.GetBool(EnableBPFClockProbe)
 	c.EnableIPMasqAgent = viper.GetBool(EnableIPMasqAgent)
 	c.EnableEgressGateway = viper.GetBool(EnableEgressGateway)
@@ -2435,8 +2439,6 @@ func (c *DaemonConfig) Populate() {
 	c.MonitorQueueSize = viper.GetInt(MonitorQueueSizeName)
 	c.MTU = viper.GetInt(MTUName)
 	c.NAT46Range = viper.GetString(NAT46Range)
-	c.FlannelMasterDevice = viper.GetString(FlannelMasterDevice)
-	c.FlannelUninstallOnExit = viper.GetBool(FlannelUninstallOnExit)
 	c.PProf = viper.GetBool(PProf)
 	c.PProfPort = viper.GetInt(PProfPort)
 	c.PreAllocateMaps = viper.GetBool(PreAllocateMapsName)
@@ -2665,6 +2667,9 @@ func (c *DaemonConfig) Populate() {
 	c.HubbleExportFileMaxSizeMB = viper.GetInt(HubbleExportFileMaxSizeMB)
 	c.HubbleExportFileMaxBackups = viper.GetInt(HubbleExportFileMaxBackups)
 	c.HubbleExportFileCompress = viper.GetBool(HubbleExportFileCompress)
+	c.EnableHubbleRecorderAPI = viper.GetBool(EnableHubbleRecorderAPI)
+	c.HubbleRecorderStoragePath = viper.GetString(HubbleRecorderStoragePath)
+	c.HubbleRecorderSinkQueueSize = viper.GetInt(HubbleRecorderSinkQueueSize)
 	c.DisableIptablesFeederRules = viper.GetStringSlice(DisableIptablesFeederRules)
 
 	// Hidden options
@@ -3054,14 +3059,6 @@ func sanitizeIntParam(paramName string, paramDefault int) int {
 		return paramDefault
 	}
 	return intParam
-}
-
-func getHostDevice() string {
-	hostDevice := viper.GetString(FlannelMasterDevice)
-	if hostDevice == "" {
-		return defaults.HostDevice
-	}
-	return hostDevice
 }
 
 // InitConfig reads in config file and ENV variables if set.

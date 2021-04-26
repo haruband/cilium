@@ -83,6 +83,7 @@ import (
 	"github.com/cilium/cilium/pkg/probe"
 	"github.com/cilium/cilium/pkg/proxy"
 	"github.com/cilium/cilium/pkg/rate"
+	"github.com/cilium/cilium/pkg/recorder"
 	"github.com/cilium/cilium/pkg/redirectpolicy"
 	"github.com/cilium/cilium/pkg/service"
 	serviceStore "github.com/cilium/cilium/pkg/service/store"
@@ -112,6 +113,7 @@ type Daemon struct {
 	buildEndpointSem *semaphore.Weighted
 	l7Proxy          *proxy.Proxy
 	svc              *service.Service
+	rec              *recorder.Recorder
 	policy           *policy.Repository
 	preFilter        datapath.PreFilter
 
@@ -369,6 +371,12 @@ func NewDaemon(ctx context.Context, cancel context.CancelFunc, epMgr *endpointma
 
 	d.svc = service.NewService(&d)
 
+	d.rec, err = recorder.NewRecorder(d.ctx, &d)
+	if err != nil {
+		log.WithError(err).Error("Error while initializing BPF pcap recorder")
+		return nil, nil, err
+	}
+
 	d.identityAllocator = cache.NewCachingIdentityAllocator(&d)
 	d.policy = policy.NewPolicyRepository(d.identityAllocator.GetIdentityCache(),
 		certificatemanager.NewManager(option.Config.CertDirectory, k8s.Client()))
@@ -413,14 +421,6 @@ func NewDaemon(ctx context.Context, cancel context.CancelFunc, epMgr *endpointma
 
 	bootstrapStats.daemonInit.End(true)
 
-	// Delete BPF programs on exit if running in tandem with Flannel.
-	if option.Config.FlannelUninstallOnExit {
-		cleaner.cleanupFuncs.Add(func() {
-			for _, ep := range d.endpointManager.GetEndpoints() {
-				ep.DeleteBPFProgramLocked()
-			}
-		})
-	}
 	// Stop all endpoints (its goroutines) on exit.
 	cleaner.cleanupFuncs.Add(func() {
 		log.Info("Waiting for all endpoints' go routines to be stopped.")

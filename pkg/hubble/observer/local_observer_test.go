@@ -21,12 +21,12 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"testing"
 	"time"
 
 	flowpb "github.com/cilium/cilium/api/v1/flow"
 	observerpb "github.com/cilium/cilium/api/v1/observer"
-	v1 "github.com/cilium/cilium/pkg/hubble/api/v1"
 	"github.com/cilium/cilium/pkg/hubble/container"
 	"github.com/cilium/cilium/pkg/hubble/observer/observeroption"
 	observerTypes "github.com/cilium/cilium/pkg/hubble/observer/types"
@@ -34,8 +34,6 @@ import (
 	"github.com/cilium/cilium/pkg/hubble/testutils"
 	"github.com/cilium/cilium/pkg/monitor"
 	monitorAPI "github.com/cilium/cilium/pkg/monitor/api"
-	nodeTypes "github.com/cilium/cilium/pkg/node/types"
-	"github.com/golang/protobuf/ptypes/timestamp"
 
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
@@ -133,27 +131,35 @@ func TestLocalObserverServer_GetFlows(t *testing.T) {
 	assert.Equal(t, req.Number, uint64(i))
 }
 
-func TestLocalObserverServer_GetFlows_AgentEvent(t *testing.T) {
+func TestLocalObserverServer_GetAgentEvents(t *testing.T) {
 	numEvents := 100
 	queueSize := 0
-	req := &observerpb.GetFlowsRequest{
-		Number: uint64(10),
-		Whitelist: []*observerpb.FlowFilter{
-			{
-				EventType: []*observerpb.EventTypeFilter{
-					{
-						Type: monitorAPI.MessageTypeAgent,
-					},
-				},
-			},
-		},
+	req := &observerpb.GetAgentEventsRequest{
+		Number: uint64(numEvents),
 	}
-	i := 0
-	fakeServer := &testutils.FakeGetFlowsServer{
-		OnSend: func(response *observerpb.GetFlowsResponse) error {
-			assert.NotNil(t, int64(1), response.GetAgentEvent().GetAgentStart().GetTime().GetSeconds()%2)
-			assert.Equal(t, int64(1), response.GetTime().GetSeconds()%2)
-			i++
+	cidr := "10.0.0.0/8"
+	agentEventsReceived := 0
+	agentStartedReceived := 0
+	fakeServer := &testutils.FakeGetAgentEventsServer{
+		OnSend: func(response *observerpb.GetAgentEventsResponse) error {
+			switch ev := response.GetAgentEvent(); ev.GetType() {
+			case flowpb.AgentEventType_AGENT_STARTED:
+				startEvent := response.GetAgentEvent().GetAgentStart()
+				assert.NotNil(t, startEvent)
+				assert.Equal(t, startEvent.GetTime().GetSeconds(), int64(42))
+				assert.Equal(t, startEvent.GetTime().GetNanos(), int32(1))
+				agentStartedReceived++
+			case flowpb.AgentEventType_IPCACHE_UPSERTED:
+				ipcacheUpdate := response.GetAgentEvent().GetIpcacheUpdate()
+				assert.NotNil(t, ipcacheUpdate)
+				assert.Equal(t, cidr, ipcacheUpdate.GetCidr())
+			case flowpb.AgentEventType_SERVICE_DELETED:
+				serviceDelete := response.GetAgentEvent().GetServiceDelete()
+				assert.NotNil(t, serviceDelete)
+			default:
+				assert.Fail(t, "unexpected agent event", ev)
+			}
+			agentEventsReceived++
 			return nil
 		},
 		FakeGRPCServerStream: &testutils.FakeGRPCServerStream{
@@ -165,7 +171,6 @@ func TestLocalObserverServer_GetFlows_AgentEvent(t *testing.T) {
 
 	pp := noopParser(t)
 	s, err := NewLocalServer(pp, log,
-		observeroption.WithMaxFlows(container.Capacity127),
 		observeroption.WithMonitorBuffer(queueSize),
 	)
 	require.NoError(t, err)
@@ -173,38 +178,34 @@ func TestLocalObserverServer_GetFlows_AgentEvent(t *testing.T) {
 
 	m := s.GetEventsChannel()
 	for i := 0; i < numEvents; i++ {
-		// flow events are even, agent events are odd
-		generateFlowEvent := i%2 == 0
 		ts := time.Unix(int64(i), 0)
 		node := fmt.Sprintf("node #%03d", i)
-		if generateFlowEvent {
-			tn := monitor.TraceNotifyV0{Type: byte(monitorAPI.MessageTypeTrace)}
-			data := testutils.MustCreateL3L4Payload(tn)
-			m <- &observerTypes.MonitorEvent{
-				Timestamp: ts,
-				NodeName:  node,
-				Payload: &observerTypes.PerfEvent{
-					Data: data,
-					CPU:  0,
-				},
-			}
+		var msg monitorAPI.AgentNotifyMessage
+		if i == 0 {
+			msg = monitorAPI.StartMessage(time.Unix(42, 1))
+		} else if i%2 == 1 {
+			msg = monitorAPI.IPCacheUpsertedMessage(cidr, uint32(i), nil, net.ParseIP("10.1.5.4"), nil, 0xff, "default", "foobar")
 		} else {
-			m <- &observerTypes.MonitorEvent{
-				Timestamp: ts,
-				NodeName:  node,
-				Payload: &observerTypes.AgentEvent{
-					Type:    monitorAPI.MessageTypeAgent,
-					Message: monitorAPI.StartMessage(ts),
-				},
-			}
+			msg = monitorAPI.ServiceDeleteMessage(uint32(i))
 		}
-
+		m <- &observerTypes.MonitorEvent{
+			Timestamp: ts,
+			NodeName:  node,
+			Payload: &observerTypes.AgentEvent{
+				Type:    monitorAPI.MessageTypeAgent,
+				Message: msg,
+			},
+		}
 	}
 	close(s.GetEventsChannel())
 	<-s.GetStopped()
-	err = s.GetFlows(req, fakeServer)
+	err = s.GetAgentEvents(req, fakeServer)
 	assert.NoError(t, err)
-	assert.Equal(t, req.Number, uint64(i))
+	assert.Equal(t, 1, agentStartedReceived)
+	// FIXME:
+	// This should be assert.Equals(t, numEvents, agentEventsReceived)
+	// A bug in the ring buffer prevents this from succeeding
+	assert.Greater(t, agentEventsReceived, 0)
 }
 
 func TestLocalObserverServer_GetFlows_Follow_Since(t *testing.T) {
@@ -486,68 +487,4 @@ func TestLocalObserverServer_OnGetFlows(t *testing.T) {
 	// This should be assert.Equals(t, flowsReceived, numFlows)
 	// A bug in the ring buffer prevents this from succeeding
 	assert.Greater(t, flowsReceived, 0)
-}
-
-func TestEventToGetFlowsResponse(t *testing.T) {
-	// override node name for unit test.
-	nodeName := nodeTypes.GetName()
-	newNodeName := "my-node"
-	nodeTypes.SetName(newNodeName)
-	defer func() {
-		nodeTypes.SetName(nodeName)
-	}()
-
-	// flow
-	ev := v1.Event{
-		Event: &observerpb.Flow{
-			NodeName: newNodeName,
-			Time:     &timestamp.Timestamp{Seconds: 1},
-		},
-	}
-	res := EventToGetFlowsResponse(&ev)
-	expected := &observerpb.GetFlowsResponse{
-		ResponseTypes: &observerpb.GetFlowsResponse_Flow{Flow: ev.Event.(*flowpb.Flow)},
-		NodeName:      newNodeName,
-		Time:          ev.GetFlow().Time,
-	}
-	assert.Equal(t, res, expected)
-
-	// lost event
-	ev = v1.Event{
-		Timestamp: &timestamp.Timestamp{Seconds: 1},
-		Event:     &observerpb.LostEvent{},
-	}
-	res = EventToGetFlowsResponse(&ev)
-	expected = &observerpb.GetFlowsResponse{
-		ResponseTypes: &observerpb.GetFlowsResponse_LostEvents{LostEvents: ev.Event.(*flowpb.LostEvent)},
-		NodeName:      newNodeName,
-		Time:          ev.Timestamp,
-	}
-	assert.Equal(t, res, expected)
-
-	// agent event
-	ev = v1.Event{
-		Timestamp: &timestamp.Timestamp{Seconds: 1},
-		Event:     &observerpb.AgentEvent{},
-	}
-	res = EventToGetFlowsResponse(&ev)
-	expected = &observerpb.GetFlowsResponse{
-		ResponseTypes: &observerpb.GetFlowsResponse_AgentEvent{AgentEvent: ev.Event.(*flowpb.AgentEvent)},
-		NodeName:      newNodeName,
-		Time:          ev.Timestamp,
-	}
-	assert.Equal(t, res, expected)
-
-	// debug event
-	ev = v1.Event{
-		Timestamp: &timestamp.Timestamp{Seconds: 1},
-		Event:     &observerpb.DebugEvent{},
-	}
-	res = EventToGetFlowsResponse(&ev)
-	expected = &observerpb.GetFlowsResponse{
-		ResponseTypes: &observerpb.GetFlowsResponse_DebugEvent{DebugEvent: ev.Event.(*flowpb.DebugEvent)},
-		NodeName:      newNodeName,
-		Time:          ev.Timestamp,
-	}
-	assert.Equal(t, res, expected)
 }

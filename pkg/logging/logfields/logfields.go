@@ -31,6 +31,9 @@ const (
 	// NodeName is a human readable name for the node
 	NodeName = "nodeName"
 
+	// Endpoint is the endpoint name (e.g. wireguard)
+	Endpoint = "endpoint"
+
 	// EndpointID is the numeric endpoint identifier
 	EndpointID = "endpointID"
 
@@ -181,6 +184,9 @@ const (
 
 	// CIDR is a IPv4/IPv4 subnet/CIDR
 	CIDR = "cidr"
+
+	// IPAddrs is a lsit of IP addrs
+	IPAddrs = "ipAddrs"
 
 	// MTU is the maximum transmission unit of one interface
 	MTU = "mtu"
@@ -529,11 +535,11 @@ const (
 	// NodeIPv6 is the node IPv4 addr
 	NodeIPv6 = "nodeIPv6"
 
-	// PodCIDRv4 is the pod IPv4 allocation CIDR
-	PodCIDRv4 = "podCIDRv4"
+	// OldNode refers to the node before the update
+	OldNode = "oldNode"
 
-	// PodCIDRv6 is the pod IPv4 allocation CIDR
-	PodCIDRv6 = "podCIDRv6"
+	// NewNode refers to the node after the update
+	NewNode = "newNode"
 
 	// AttachedENIs are the ENIs which have been attached to the node
 	AttachedENIs = "attachedENIs"

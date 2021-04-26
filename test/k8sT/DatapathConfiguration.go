@@ -180,7 +180,6 @@ var _ = Describe("K8sDatapathConfig", func() {
 
 	Context("Encapsulation", func() {
 		BeforeEach(func() {
-			SkipIfIntegration(helpers.CIIntegrationFlannel)
 			SkipIfIntegration(helpers.CIIntegrationGKE)
 		})
 
@@ -312,7 +311,6 @@ var _ = Describe("K8sDatapathConfig", func() {
 
 	Context("AutoDirectNodeRoutes", func() {
 		BeforeEach(func() {
-			SkipIfIntegration(helpers.CIIntegrationFlannel)
 			SkipIfIntegration(helpers.CIIntegrationGKE)
 		})
 
@@ -481,6 +479,110 @@ var _ = Describe("K8sDatapathConfig", func() {
 		})
 	})
 
+	SkipContextIf(helpers.DoesNotRunOnNetNextKernel, "Wireguard encryption", func() {
+		testWireguard := func(interNodeDev string) {
+			randomNamespace := deploymentManager.DeployRandomNamespaceShared(DemoDaemonSet)
+			deploymentManager.WaitUntilReady()
+
+			k8s1NodeName, k8s1IP := kubectl.GetNodeInfo(helpers.K8s1)
+			k8s2NodeName, k8s2IP := kubectl.GetNodeInfo(helpers.K8s2)
+
+			// Fetch srcPod (testDSClient@k8s1)
+			srcPod, srcPodJSON := fetchPodsWithOffset(kubectl, randomNamespace, "client", "zgroup=testDSClient", k8s2IP, true, 0)
+			srcPodIP, err := srcPodJSON.Filter("{.status.podIP}")
+			ExpectWithOffset(1, err).Should(BeNil(), "Failure to retrieve pod IP %s", srcPod)
+			srcHost, err := srcPodJSON.Filter("{.status.hostIP}")
+			ExpectWithOffset(1, err).Should(BeNil(), "Failure to retrieve host of pod %s", srcPod)
+			// Sanity check
+			ExpectWithOffset(1, srcHost.String()).Should(Equal(k8s1IP))
+			// Fetch srcPod IPv6
+			ciliumPodK8s1, err := kubectl.GetCiliumPodOnNode(helpers.K8s1)
+			ExpectWithOffset(1, err).Should(BeNil(), "Unable to fetch cilium pod on k8s1")
+			endpointIPs := kubectl.CiliumEndpointIPv6(ciliumPodK8s1, "-l k8s:zgroup=testDSClient")
+			// Sanity check
+			ExpectWithOffset(1, len(endpointIPs)).Should(Equal(1), "BUG: more than one DS client on %s", ciliumPodK8s1)
+			var srcPodIPv6 string
+			for _, ip := range endpointIPs {
+				srcPodIPv6 = ip
+				break
+			}
+
+			// Fetch dstPod (testDS@k8s2)
+			dstPod, dstPodJSON := fetchPodsWithOffset(kubectl, randomNamespace, "server", "zgroup=testDS", k8s1IP, true, 0)
+			dstPodIP, err := dstPodJSON.Filter("{.status.podIP}")
+			ExpectWithOffset(1, err).Should(BeNil(), "Failure to retrieve IP of pod %s", dstPod)
+			dstHost, err := dstPodJSON.Filter("{.status.hostIP}")
+			ExpectWithOffset(1, err).Should(BeNil(), "Failure to retrieve host of pod %s", dstPod)
+			// Sanity check
+			ExpectWithOffset(1, dstHost.String()).Should(Equal(k8s2IP))
+			// Fetch dstPod IPv6
+			ciliumPodK8s2, err := kubectl.GetCiliumPodOnNode(helpers.K8s2)
+			ExpectWithOffset(1, err).Should(BeNil(), "Unable to fetch cilium pod on k8s2")
+			endpointIPs = kubectl.CiliumEndpointIPv6(ciliumPodK8s2, "-l k8s:zgroup=testDS")
+			// Sanity check
+			ExpectWithOffset(1, len(endpointIPs)).Should(Equal(1), "BUG: more than one DS server on %s", ciliumPodK8s2)
+			var dstPodIPv6 string
+			for _, ip := range endpointIPs {
+				dstPodIPv6 = ip
+				break
+			}
+
+			checkNoLeak := func(srcPod, srcIP, dstIP string) {
+				cmd := fmt.Sprintf("tcpdump -i %s --immediate-mode -n 'host %s and host %s' -c 1", interNodeDev, srcIP, dstIP)
+				res1, cancel1, err := kubectl.ExecInHostNetNSInBackground(context.TODO(), k8s1NodeName, cmd)
+				ExpectWithOffset(2, err).Should(BeNil(), "Cannot exec tcpdump in bg")
+				res2, cancel2, err := kubectl.ExecInHostNetNSInBackground(context.TODO(), k8s2NodeName, cmd)
+				ExpectWithOffset(2, err).Should(BeNil(), "Cannot exec tcpdump in bg")
+
+				// HTTP connectivity test (pod2pod)
+				kubectl.ExecPodCmd(randomNamespace, srcPod,
+					helpers.CurlFail("http://%s/", net.JoinHostPort(dstIP, "80"))).ExpectSuccess("Failed to curl dst pod")
+
+				// Check that no unencrypted pod2pod traffic was captured on the direct routing device
+				cancel1()
+				cancel2()
+				ExpectWithOffset(2, res1.CombineOutput().String()).Should(Not(ContainSubstring("1 packet captured")))
+				ExpectWithOffset(2, res2.CombineOutput().String()).Should(Not(ContainSubstring("1 packet captured")))
+			}
+
+			checkNoLeak(srcPod, srcPodIP.String(), dstPodIP.String())
+			checkNoLeak(srcPod, srcPodIPv6, dstPodIPv6)
+
+			// Check that the src pod can reach the remote host
+			kubectl.ExecPodCmd(randomNamespace, srcPod, helpers.Ping(k8s2IP)).
+				ExpectSuccess("Failed to ping k8s2 host from src pod")
+
+			// Check that the remote host can reach the dst pod
+			kubectl.ExecInHostNetNS(context.TODO(), k8s1NodeName,
+				helpers.CurlFail("http://%s:80/", dstPodIP)).ExpectSuccess("Failed to curl dst pod from k8s1")
+		}
+
+		It("Pod2pod is encrypted in direct-routing mode", func() {
+			deploymentManager.DeployCilium(map[string]string{
+				"tunnel":               "disabled",
+				"autoDirectNodeRoutes": "true",
+				"encryption.enabled":   "true",
+				"encryption.type":      "wireguard",
+				"l7Proxy":              "false",
+			}, DeployCiliumOptionsAndDNS)
+
+			privateIface, err := kubectl.GetPrivateIface()
+			Expect(err).Should(BeNil(), "Cannot determine private iface")
+			testWireguard(privateIface)
+		})
+
+		It("Pod2pod is encrypted in tunneling mode", func() {
+			deploymentManager.DeployCilium(map[string]string{
+				"tunnel":             "vxlan",
+				"encryption.enabled": "true",
+				"encryption.type":    "wireguard",
+				"l7Proxy":            "false",
+			}, DeployCiliumOptionsAndDNS)
+
+			testWireguard("cilium_vxlan")
+		})
+	})
+
 	Context("Sockops performance", func() {
 		directRoutingOptions := map[string]string{
 			"tunnel":               "disabled",
@@ -552,7 +654,6 @@ var _ = Describe("K8sDatapathConfig", func() {
 
 	Context("Transparent encryption DirectRouting", func() {
 		SkipItIf(helpers.RunsWithoutKubeProxy, "Check connectivity with transparent encryption and direct routing", func() {
-			SkipIfIntegration(helpers.CIIntegrationFlannel)
 			SkipIfIntegration(helpers.CIIntegrationGKE)
 
 			privateIface, err := kubectl.GetPrivateIface()
@@ -575,7 +676,6 @@ var _ = Describe("K8sDatapathConfig", func() {
 		// loading on the native device, the source identity of packet on the
 		// destination node is resolved to WORLD and policy enforcement fails.
 		XIt("Check connectivity with transparent encryption and direct routing with bpf_host", func() {
-			SkipIfIntegration(helpers.CIIntegrationFlannel)
 			SkipIfIntegration(helpers.CIIntegrationGKE)
 
 			privateIface, err := kubectl.GetPrivateIface()
@@ -599,9 +699,6 @@ var _ = Describe("K8sDatapathConfig", func() {
 
 	Context("IPv4Only", func() {
 		It("Check connectivity with IPv6 disabled", func() {
-			// Flannel always disables IPv6, this test is a no-op in that case.
-			SkipIfIntegration(helpers.CIIntegrationFlannel)
-
 			deploymentManager.DeployCilium(map[string]string{
 				"ipv4.enabled": "true",
 				"ipv6.enabled": "false",
@@ -633,6 +730,14 @@ var _ = Describe("K8sDatapathConfig", func() {
 	})
 
 	Context("Host firewall", func() {
+		BeforeAll(func() {
+			kubectl.Exec("kubectl label nodes --all status=lockdown")
+		})
+
+		AfterAll(func() {
+			kubectl.Exec("kubectl label nodes --all status-")
+		})
+
 		AfterEach(func() {
 			kubectl.Exec(fmt.Sprintf("%s delete --all ccnp", helpers.KubectlCmd))
 		})

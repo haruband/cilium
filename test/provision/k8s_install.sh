@@ -20,7 +20,6 @@ IP=$2
 K8S_VERSION=$3
 IPv6=$4
 CONTAINER_RUNTIME=$5
-CNI_INTEGRATION=$6
 
 # Kubeadm default parameters
 export KUBEADM_ADDR='192.168.36.11'
@@ -40,11 +39,6 @@ export KUBEDNS_DEPLOYMENT="${PROVISIONSRC}/manifest/kubedns_deployment.yaml"
 export COREDNS_DEPLOYMENT="${PROVISIONSRC}/manifest/${K8S_VERSION}/coredns_deployment.yaml"
 if [ ! -f "${COREDNS_DEPLOYMENT}" ]; then
     export COREDNS_DEPLOYMENT="${PROVISIONSRC}/manifest/coredns_deployment.yaml"
-fi
-
-if [ "${CNI_INTEGRATION}" == "flannel" ]; then
-    export KUBEADM_POD_CIDR="10.244.0.0/16"
-    export KUBEADM_V1BETA2_POD_CIDR="10.244.0.0/16,fd02::/112"
 fi
 
 source ${PROVISIONSRC}/helpers.bash
@@ -255,7 +249,7 @@ case $K8S_VERSION in
         sudo apt-get install -y conntrack
         KUBERNETES_CNI_VERSION="0.8.7"
         KUBERNETES_CNI_OS="-linux"
-        K8S_FULL_VERSION="1.18.17"
+        K8S_FULL_VERSION="1.18.18"
         KUBEADM_OPTIONS="--ignore-preflight-errors=cri,swap"
         KUBEADM_SLAVE_OPTIONS="--discovery-token-unsafe-skip-ca-verification --ignore-preflight-errors=cri,SystemVerification,swap"
         sudo ln -sf $COREDNS_DEPLOYMENT $DNS_DEPLOYMENT
@@ -269,7 +263,7 @@ case $K8S_VERSION in
         sudo apt-get install -y conntrack
         KUBERNETES_CNI_VERSION="0.8.7"
         KUBERNETES_CNI_OS="-linux"
-        K8S_FULL_VERSION="1.19.9"
+        K8S_FULL_VERSION="1.19.10"
         KUBEADM_OPTIONS="--ignore-preflight-errors=cri,swap"
         KUBEADM_SLAVE_OPTIONS="--discovery-token-unsafe-skip-ca-verification --ignore-preflight-errors=cri,SystemVerification,swap"
         sudo ln -sf $COREDNS_DEPLOYMENT $DNS_DEPLOYMENT
@@ -283,7 +277,7 @@ case $K8S_VERSION in
         sudo apt-get install -y conntrack
         KUBERNETES_CNI_VERSION="0.8.7"
         KUBERNETES_CNI_OS="-linux"
-        K8S_FULL_VERSION="1.20.5"
+        K8S_FULL_VERSION="1.20.6"
         KUBEADM_OPTIONS="--ignore-preflight-errors=cri,swap"
         KUBEADM_SLAVE_OPTIONS="--discovery-token-unsafe-skip-ca-verification --ignore-preflight-errors=cri,SystemVerification,swap"
         sudo ln -sf $COREDNS_DEPLOYMENT $DNS_DEPLOYMENT

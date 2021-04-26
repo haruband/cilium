@@ -68,23 +68,25 @@ cilium-agent [flags]
       --disable-iptables-feeder-rules strings                Chains to ignore when installing feeder rules.
       --dns-max-ips-per-restored-rule int                    Maximum number of IPs to maintain for each restored DNS rule (default 1000)
       --egress-masquerade-interfaces string                  Limit egress masquerading to interface selector
-      --egress-multi-home-ip-rule-compat                     Use a new scheme to store rules and routes under ENI and Azure IPAM modes, if false. Otherwise, it will use the old scheme.
+      --egress-multi-home-ip-rule-compat                     Offset routing table IDs under ENI IPAM mode to avoid collisions with reserved table IDs. If false, the offset is performed (new scheme), otherwise, the old scheme stays in-place.
       --enable-auto-protect-node-port-range                  Append NodePort range to net.ipv4.ip_local_reserved_ports if it overlaps with ephemeral port range (net.ipv4.ip_local_port_range) (default true)
       --enable-bandwidth-manager                             Enable BPF bandwidth manager
       --enable-bpf-clock-probe                               Enable BPF clock source probing for more efficient tick retrieval
       --enable-bpf-masquerade                                Masquerade packets from endpoints leaving the host with BPF instead of iptables
       --enable-bpf-tproxy                                    Enable BPF-based proxy redirection, if support available
       --enable-custom-calls                                  Enable tail call hooks for custom eBPF programs
+      --enable-egress-gateway                                Enable egress gateway
       --enable-endpoint-health-checking                      Enable connectivity health checking between virtual endpoints (default true)
       --enable-endpoint-routes                               Use per endpoint routes instead of routing via cilium_host
       --enable-external-ips                                  Enable k8s service externalIPs feature (requires enabling enable-node-port) (default true)
       --enable-health-check-nodeport                         Enables a healthcheck nodePort server for NodePort services with 'healthCheckNodePort' being set (default true)
       --enable-health-checking                               Enable connectivity health checking (default true)
-      --enable-host-firewall                                 Enable host network policies (beta)
+      --enable-host-firewall                                 Enable host network policies
       --enable-host-legacy-routing                           Enable the legacy host forwarding model which does not bypass upper stack in host namespace
       --enable-host-port                                     Enable k8s hostPort mapping feature (requires enabling enable-node-port) (default true)
       --enable-host-reachable-services                       Enable reachability of services for host applications
       --enable-hubble                                        Enable hubble server
+      --enable-hubble-recorder-api                           Enable the Hubble recorder API (default true)
       --enable-identity-mark                                 Enable setting identity mark for local traffic (default true)
       --enable-ip-masq-agent                                 Enable BPF ip-masq-agent
       --enable-ipsec                                         Enable IPSec support
@@ -119,8 +121,6 @@ cilium-agent [flags]
       --envoy-log string                                     Path to a separate Envoy log file, if any
       --exclude-local-address strings                        Exclude CIDR from being recognized as local address
       --fixed-identity-mapping map                           Key-value for the fixed identity mapping which allows to use reserved label for fixed identities (default map[])
-      --flannel-master-device string                         Installs a BPF program to allow for policy enforcement in the given network interface. Allows to run Cilium on top of other CNI plugins that provide networking, e.g. flannel, where for flannel, this value should be set with 'cni0'. [EXPERIMENTAL]
-      --flannel-uninstall-on-exit                            When used along the flannel-master-device flag, it cleans up all BPF programs installed when Cilium agent is terminated.
       --force-local-policy-eval-at-source                    Force policy evaluation of all local communication at the source endpoint (default true)
       --gops-port int                                        Port for gops server to listen on (default 9890)
   -h, --help                                                 help for cilium-agent
@@ -140,6 +140,8 @@ cilium-agent [flags]
       --hubble-listen-address string                         An additional address for Hubble server to listen to, e.g. ":4244"
       --hubble-metrics strings                               List of Hubble metrics to enable.
       --hubble-metrics-server string                         Address to serve Hubble metrics on.
+      --hubble-recorder-sink-queue-size int                  Queue size of each Hubble recorder sink (default 1024)
+      --hubble-recorder-storage-path string                  Directory in which pcap files created via the Hubble Recorder API are stored (default "/var/run/cilium/pcaps")
       --hubble-socket-path string                            Set hubble's socket path to listen for connections (default "/var/run/cilium/hubble.sock")
       --hubble-tls-cert-file string                          Path to the public key file for the Hubble server. The file must contain PEM encoded data.
       --hubble-tls-client-ca-files strings                   Paths to one or more public key files of client CA certificates to use for TLS with mutual authentication (mTLS). The files must contain PEM encoded data. When provided, this option effectively enables mTLS.
@@ -185,7 +187,8 @@ cilium-agent [flags]
       --label-prefix-file string                             Valid label prefixes file path
       --labels strings                                       List of label prefixes used to determine identity of an endpoint
       --lib-dir string                                       Directory path to store runtime build environment (default "/var/lib/cilium")
-      --local-router-ip string                               Link-local IP used for Cilium's router devices
+      --local-router-ipv4 string                             Link-local IPv4 used for Cilium's router devices
+      --local-router-ipv6 string                             Link-local IPv6 used for Cilium's router devices
       --log-driver strings                                   Logging endpoints to use for example syslog
       --log-opt map                                          Log driver options for cilium-agent, configmap example for syslog driver: {"syslog.level":"info","syslog.facility":"local5","syslog.tag":"cilium-agent"} (default map[])
       --log-system-load                                      Enable periodic logging of system load

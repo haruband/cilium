@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -56,10 +57,6 @@ const (
 	// The kubedns resyncPeriod is defined at
 	// https://github.com/kubernetes/dns/blob/80fdd88276adba36a87c4f424b66fdf37cd7c9a8/pkg/dns/dns.go#L53
 	DNSHelperTimeout = 7 * time.Minute
-
-	// CIIntegrationFlannel contains the constant to be used when flannel is
-	// used in the CI.
-	CIIntegrationFlannel = "flannel"
 
 	// CIIntegrationEKSChaining contains the constants to be used when running tests on EKS with aws-cni in chaining mode.
 	CIIntegrationEKSChaining = "eks-chaining"
@@ -124,12 +121,6 @@ var (
 		"ipam.operator.clusterPoolIPv6PodCIDR": "fd02::/112",
 	}
 
-	flannelHelmOverrides = map[string]string{
-		"flannel.enabled": "true",
-		"ipv6.enabled":    "false",
-		"tunnel":          "disabled",
-	}
-
 	eksChainingHelmOverrides = map[string]string{
 		"k8s.requireIPv4PodCIDR": "false",
 		"cni.chainingMode":       "aws-cni",
@@ -190,7 +181,6 @@ var (
 	// specific CI environment integrations.
 	// The key must be a string consisting of lower case characters.
 	helmOverrides = map[string]map[string]string{
-		CIIntegrationFlannel:     flannelHelmOverrides,
 		CIIntegrationEKSChaining: eksChainingHelmOverrides,
 		CIIntegrationEKS:         eksHelmOverrides,
 		CIIntegrationGKE:         gkeHelmOverrides,
@@ -291,6 +281,10 @@ func Init() {
 // GetCurrentK8SEnv returns the value of K8S_VERSION from the OS environment.
 func GetCurrentK8SEnv() string { return os.Getenv("K8S_VERSION") }
 
+func GetKubectlPath() string {
+	return path.Join(config.CiliumTestConfig.KubectlPath, GetCurrentK8SEnv())
+}
+
 // GetCurrentIntegration returns CI integration set up to run against Cilium.
 func GetCurrentIntegration() string {
 	integration := strings.ToLower(os.Getenv("CNI_INTEGRATION"))
@@ -353,6 +347,7 @@ func CreateKubectl(vmName string, log *logrus.Entry) (k *Kubectl) {
 			environ = append(environ, os.Environ()...)
 		}
 		environ = append(environ, "KUBECONFIG="+config.CiliumTestConfig.Kubeconfig)
+		environ = append(environ, fmt.Sprintf("PATH=%s:%s", GetKubectlPath(), os.Getenv("PATH")))
 
 		// Create the executor
 		exec := CreateLocalExecutor(environ)
@@ -362,6 +357,9 @@ func CreateKubectl(vmName string, log *logrus.Entry) (k *Kubectl) {
 			Executor: exec,
 		}
 		k.setBasePath()
+		if err := k.ensureKubectlVersion(); err != nil {
+			ginkgoext.Failf("failed to ensure kubectl version")
+		}
 	}
 
 	// Make sure the namespace Cilium uses exists.
@@ -2562,7 +2560,6 @@ func (kub *Kubectl) convertOptionsToLegacyOptions(options map[string]string) map
 		"enableCnpStatusUpdates":        "config.enableCnpStatusUpdates",
 		"etcd.leaseTTL":                 "global.etcd.leaseTTL",
 		"externalIPs.enabled":           "global.externalIPs.enabled",
-		"flannel.enabled":               "global.flannel.enabled",
 		"gke.enabled":                   "global.gke.enabled",
 		"hostFirewall":                  "global.hostFirewall",
 		"hostPort.enabled":              "global.hostPort.enabled",
@@ -3731,14 +3728,12 @@ func (kub *Kubectl) validateCilium() error {
 		return nil
 	})
 
-	if GetCurrentIntegration() != CIIntegrationFlannel {
-		g.Go(func() error {
-			if err := kub.ciliumHealthPreFlightCheck(); err != nil {
-				return fmt.Errorf("connectivity health is failing: %s", err)
-			}
-			return nil
-		})
-	}
+	g.Go(func() error {
+		if err := kub.ciliumHealthPreFlightCheck(); err != nil {
+			return fmt.Errorf("connectivity health is failing: %s", err)
+		}
+		return nil
+	})
 
 	g.Go(func() error {
 		err := kub.fillServiceCache()
@@ -4520,4 +4515,44 @@ func hasIPAddress(output []string) (bool, string) {
 		}
 	}
 	return false, ""
+}
+
+func (kub *Kubectl) ensureKubectlVersion() error {
+	//check current kubectl version
+	type Version struct {
+		ClientVersion struct {
+			Major string `json:"major"`
+			Minor string `json:"minor"`
+		} `json:"clientVersion"`
+	}
+	res := kub.ExecShort(fmt.Sprintf("%s version --client -o json", KubectlCmd))
+	if !res.WasSuccessful() {
+		return fmt.Errorf("failed to run kubectl version")
+	}
+
+	var v Version
+
+	err := json.Unmarshal([]byte(res.GetStdOut().String()), &v)
+	if err != nil {
+		return err
+	}
+
+	versionstring := fmt.Sprintf("%s.%s", v.ClientVersion.Major, v.ClientVersion.Minor)
+	if versionstring == GetCurrentK8SEnv() {
+		//version available on host is matching current env
+		return nil
+	}
+
+	err = os.MkdirAll(GetKubectlPath(), os.ModePerm)
+	if err != nil {
+		return err
+	}
+	path := path.Join(GetKubectlPath(), "kubectl")
+	res = kub.Exec(
+		fmt.Sprintf("curl --output %s https://storage.googleapis.com/kubernetes-release/release/v%s.0/bin/linux/amd64/kubectl && chmod +x %s",
+			path, GetCurrentK8SEnv(), path))
+	if !res.WasSuccessful() {
+		return fmt.Errorf("failed to download kubectl")
+	}
+	return nil
 }

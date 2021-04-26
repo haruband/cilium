@@ -353,6 +353,9 @@ ct_recreate6:
 
 	/* The packet goes to a peer not managed by this agent instance */
 #ifdef ENCAP_IFINDEX
+# ifdef ENABLE_WIREGUARD
+	if (!dst_remote_ep)
+# endif /* ENABLE_WIREGUARD */
 	{
 		struct endpoint_key key = {};
 
@@ -394,17 +397,7 @@ ct_recreate6:
 
 #ifdef ENABLE_ROUTING
 to_host:
-	if (is_defined(HOST_REDIRECT_TO_INGRESS) ||
-	    (is_defined(ENABLE_HOST_FIREWALL) && *dstID == HOST_ID)) {
-		if (is_defined(HOST_REDIRECT_TO_INGRESS)) {
-			union macaddr host_mac = HOST_IFINDEX_MAC;
-
-			ret = ipv6_l3(ctx, l3_off, (__u8 *)&router_mac.addr,
-				      (__u8 *)&host_mac.addr, METRIC_EGRESS);
-			if (ret != CTX_ACT_OK)
-				return ret;
-		}
-
+	if (is_defined(ENABLE_HOST_FIREWALL) && *dstID == HOST_ID) {
 		send_trace_notify(ctx, TRACE_TO_HOST, SECLABEL, HOST_ID, 0,
 				  HOST_IFINDEX, reason, monitor);
 		return redirect(HOST_IFINDEX, BPF_F_INGRESS);
@@ -421,20 +414,20 @@ pass_to_stack:
 	if (ipv6_store_flowlabel(ctx, l3_off, SECLABEL_NB) < 0)
 		return DROP_WRITE_ERROR;
 
-#ifndef ENCAP_IFINDEX
-#ifdef ENABLE_IPSEC
-	if (encrypt_key && tunnel_endpoint) {
-		set_encrypt_key_mark(ctx, encrypt_key);
-#ifdef IP_POOLS
-		set_encrypt_dip(ctx, tunnel_endpoint);
-#endif
-	} else
-#elif defined(ENABLE_WIREGUARD)
+#ifdef ENABLE_WIREGUARD
 	if (dst_remote_ep)
 		set_encrypt_mark(ctx);
 	else
-#endif /* ENABLE_IPSEC */
-#endif /* ENCAP_IFINDEX */
+#elif !defined(ENCAP_IFINDEX)
+# ifdef ENABLE_IPSEC
+	if (encrypt_key && tunnel_endpoint) {
+		set_encrypt_key_mark(ctx, encrypt_key);
+#  ifdef IP_POOLS
+		set_encrypt_dip(ctx, tunnel_endpoint);
+#  endif /* IP_POOLS */
+	} else
+# endif /* ENABLE_IPSEC */
+#endif /* ENABLE_WIREGUARD */
 	{
 #ifdef ENABLE_IDENTITY_MARK
 		/* Always encode the source identity when passing to the stack.
@@ -537,6 +530,16 @@ static __always_inline int handle_ipv4_from_lxc(struct __ctx_buff *ctx,
 
 	if (!revalidate_data(ctx, &data, &data_end, &ip4))
 		return DROP_INVALID;
+
+/* If IPv4 fragmentation is disabled
+ * AND a IPv4 fragmented packet is received,
+ * then drop the packet.
+ */
+#ifndef ENABLE_IPV4_FRAGMENTS
+	if (ipv4_is_fragment(ip4))
+		return DROP_FRAG_NOSUPPORT;
+#endif
+
 	has_l4_header = ipv4_has_l4_header(ip4);
 
 	tuple.nexthdr = ip4->protocol;
@@ -810,6 +813,12 @@ skip_egress_gateway:
 #endif
 
 #ifdef ENCAP_IFINDEX
+# ifdef ENABLE_WIREGUARD
+	/* In the tunnel mode we encapsulate pod2pod traffic only via Wireguard
+	 * device, i.e. we do not encapsulate twice.
+	 */
+	if (!dst_remote_ep)
+# endif /* ENABLE_WIREGUARD */
 	{
 		struct endpoint_key key = {};
 
@@ -831,7 +840,7 @@ skip_egress_gateway:
 		else
 			return ret;
 	}
-#endif
+#endif /* ENCAP_IFINDEX */
 	if (is_defined(ENABLE_REDIRECT_FAST))
 		return redirect_direct_v4(ctx, l3_off, ip4);
 
@@ -839,17 +848,7 @@ skip_egress_gateway:
 
 #ifdef ENABLE_ROUTING
 to_host:
-	if (is_defined(HOST_REDIRECT_TO_INGRESS) ||
-	    (is_defined(ENABLE_HOST_FIREWALL) && *dstID == HOST_ID)) {
-		if (is_defined(HOST_REDIRECT_TO_INGRESS)) {
-			union macaddr host_mac = HOST_IFINDEX_MAC;
-
-			ret = ipv4_l3(ctx, l3_off, (__u8 *)&router_mac.addr,
-				      (__u8 *)&host_mac.addr, ip4);
-			if (ret != CTX_ACT_OK)
-				return ret;
-		}
-
+	if (is_defined(ENABLE_HOST_FIREWALL) && *dstID == HOST_ID) {
 		send_trace_notify(ctx, TRACE_TO_HOST, SECLABEL, HOST_ID, 0,
 				  HOST_IFINDEX, reason, monitor);
 		return redirect(HOST_IFINDEX, BPF_F_INGRESS);
@@ -862,20 +861,21 @@ pass_to_stack:
 	if (unlikely(ret != CTX_ACT_OK))
 		return ret;
 #endif
-#ifndef ENCAP_IFINDEX
-#ifdef ENABLE_IPSEC
-	if (encrypt_key && tunnel_endpoint) {
-		set_encrypt_key_mark(ctx, encrypt_key);
-#ifdef IP_POOLS
-		set_encrypt_dip(ctx, tunnel_endpoint);
-#endif
-	} else
-#elif defined(ENABLE_WIREGUARD)
+
+#ifdef ENABLE_WIREGUARD
 	if (dst_remote_ep)
 		set_encrypt_mark(ctx);
 	else /* Wireguard and identity mark are mutually exclusive */
-#endif /* ENABLE_IPSEC */
-#endif /* ENCAP_IFINDEX */
+#elif !defined(ENCAP_IFINDEX)
+# ifdef ENABLE_IPSEC
+	if (encrypt_key && tunnel_endpoint) {
+		set_encrypt_key_mark(ctx, encrypt_key);
+#  ifdef IP_POOLS
+		set_encrypt_dip(ctx, tunnel_endpoint);
+#  endif /* IP_POOLS */
+	} else
+# endif /* ENABLE_IPSEC */
+#endif /* ENABLE_WIREGUARD */
 	{
 #ifdef ENABLE_IDENTITY_MARK
 		/* Always encode the source identity when passing to the stack.

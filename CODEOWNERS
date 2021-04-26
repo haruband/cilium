@@ -1,6 +1,7 @@
 # Code owners groups and a brief description of their areas:
 # @cilium/janitors           Catch-all for code not otherwise owned
 # @cilium/agent              Cilium Agent
+# @cilium/alibabacloud       Integration with AlibabaCloud
 # @cilium/aws                Integration with AWS
 # @cilium/azure              Integration with Azure
 # @cilium/bpf                BPF Data Path
@@ -96,6 +97,7 @@ Makefile* @cilium/build
 /Documentation/contributing/ @cilium/contributing @cilium/docs-structure
 /Documentation/Dockerfile @cilium/docs-structure
 /Documentation/gettinghelp.rst @cilium/contributing @cilium/docs-structure
+/Documentation/gettingstarted/alibabacloud* @cilium/alibabacloud @cilium/docs-structure
 /Documentation/gettingstarted/aws* @cilium/aws @cilium/docs-structure
 /Documentation/gettingstarted/bandwidth-manager.rst @cilium/bpf @cilium/docs-structure
 /Documentation/gettingstarted/cni-chaining-aws-cni.rst @cilium/aws @cilium/docs-structure
@@ -105,9 +107,6 @@ Makefile* @cilium/build
 /Documentation/gettingstarted/hubble* @cilium/hubble @cilium/docs-structure
 /Documentation/gettingstarted/index.rst @cilium/docs-structure
 /Documentation/gettingstarted/ipam.rst @cilium/ipam @cilium/docs-structure
-/Documentation/gettingstarted/k8s-install-eks.rst @cilium/aws @cilium/docs-structure
-/Documentation/gettingstarted/k8s-install-remove-aws-node.rst @cilium/aws @cilium/docs-structure
-/Documentation/gettingstarted/k8s-install-aks* @cilium/azure @cilium/docs-structure
 /Documentation/gettingstarted/kind-configure.rst @cilium/docs-structure
 /Documentation/gettingstarted/kubeproxy-free.rst @cilium/loadbalancer @cilium/docs-structure
 /Documentation/gettingstarted/policy-creation.rst @cilium/policy @cilium/docs-structure
@@ -130,7 +129,7 @@ Makefile* @cilium/build
 /Documentation/yaml.config @cilium/docs-structure
 /envoy/ @cilium/proxy
 /examples/ @cilium/docs-structure
-/examples/crds/ @cilium/kubernetes
+/pkg/k8s/apis/cilium.io/v2/client/crds/ @cilium/kubernetes
 /examples/kubernetes/ @cilium/kubernetes
 /examples/minikube/ @cilium/kubernetes
 *.Jenkinsfile @cilium/ci-structure
@@ -142,6 +141,7 @@ jenkinsfiles @cilium/ci-structure
 Jenkinsfile.nightly @cilium/ci-structure
 /operator/ @cilium/operator
 /pkg/annotation @cilium/kubernetes
+/pkg/alibabacloud/ @cilium/alibabacloud
 /pkg/api/ @cilium/api
 /pkg/aws/ @cilium/aws
 /pkg/azure/ @cilium/azure
@@ -172,6 +172,7 @@ Jenkinsfile.nightly @cilium/ci-structure
 /pkg/hubble/ @cilium/hubble
 /pkg/identity @cilium/policy
 /pkg/ipam/ @cilium/ipam
+/pkg/ipam/allocator/alibabacloud/ @cilium/ipam @cilium/alibabacloud
 /pkg/ipam/allocator/aws/ @cilium/ipam @cilium/aws
 /pkg/ipam/allocator/azure/ @cilium/ipam @cilium/azure
 /pkg/ipam/allocator/clusterpool/ @cilium/ipam @cilium/operator

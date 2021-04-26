@@ -26,13 +26,13 @@ import (
 )
 
 type CaptureWcard4 struct {
-	DestAddr types.IPv4 `align:"daddr"`
 	SrcAddr  types.IPv4 `align:"saddr"`
-	DestPort uint16     `align:"dport"`
+	DestAddr types.IPv4 `align:"daddr"`
 	SrcPort  uint16     `align:"sport"`
+	DestPort uint16     `align:"dport"`
 	NextHdr  uint8      `align:"nexthdr"`
-	DestMask uint8      `align:"dmask"`
 	SrcMask  uint8      `align:"smask"`
+	DestMask uint8      `align:"dmask"`
 	Flags    uint8      `align:"flags"`
 }
 
@@ -78,6 +78,10 @@ func (k *CaptureWcard4) ToHost() RecorderKey {
 	x.DestPort = byteorder.NetworkToHost(k.DestPort).(uint16)
 	x.SrcPort = byteorder.NetworkToHost(k.SrcPort).(uint16)
 	return &x
+}
+
+func (k *CaptureWcard4) Map() *bpf.Map {
+	return &CaptureMap4.Map
 }
 
 func (v *CaptureRule4) GetValuePtr() unsafe.Pointer { return unsafe.Pointer(v) }

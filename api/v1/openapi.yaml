@@ -637,6 +637,77 @@ paths:
           x-go-name: Failure
           schema:
             "$ref": "#/definitions/Error"
+  "/recorder":
+    get:
+      summary: Retrieve list of all recorders
+      tags:
+      - recorder
+      responses:
+        '200':
+          description: Success
+          schema:
+            type: array
+            items:
+              "$ref": "#/definitions/Recorder"
+  "/recorder/masks":
+    get:
+      summary: Retrieve list of all recorder masks
+      tags:
+      - recorder
+      responses:
+        '200':
+          description: Success
+          schema:
+            type: array
+            items:
+              "$ref": "#/definitions/RecorderMask"
+  "/recorder/{id}":
+    get:
+      summary: Retrieve configuration of a recorder
+      tags:
+      - recorder
+      parameters:
+      - "$ref": "#/parameters/recorder-id"
+      responses:
+        '200':
+          description: Success
+          schema:
+            "$ref": "#/definitions/Recorder"
+        '404':
+          description: Recorder not found
+    put:
+      summary: Create or update recorder
+      tags:
+      - recorder
+      parameters:
+      - "$ref": "#/parameters/recorder-id"
+      - "$ref": "#/parameters/recorder-config"
+      responses:
+        '200':
+          description: Updated
+        '201':
+          description: Created
+        '500':
+          description: Error while creating recorder
+          x-go-name: Failure
+          schema:
+            "$ref": "#/definitions/Error"
+    delete:
+      summary: Delete a recorder
+      tags:
+      - recorder
+      parameters:
+      - "$ref": "#/parameters/recorder-id"
+      responses:
+        '200':
+          description: Success
+        '404':
+          description: Recorder not found
+        '500':
+          description: Recorder deletion failed
+          x-go-name: Failure
+          schema:
+            "$ref": "#/definitions/Error"
   "/prefilter":
     get:
       summary: Retrieve list of CIDRs
@@ -937,6 +1008,19 @@ parameters:
     required: true
     schema:
       "$ref": "#/definitions/ServiceSpec"
+  recorder-id:
+    name: id
+    description: ID of recorder
+    required: true
+    in: path
+    type: integer
+  recorder-config:
+    name: config
+    description: Recorder configuration
+    in: body
+    required: true
+    schema:
+      "$ref": "#/definitions/RecorderSpec"
   prefilter-spec:
     name: prefilter-spec
     description: List of CIDR ranges for filter table
@@ -1402,6 +1486,12 @@ definitions:
         type: object
         additionalProperties:
           type: string
+      encryption:
+        type: object
+        properties:
+          wireguard:
+            description: Status of the Wireguard agent
+            "$ref": "#/definitions/WireguardStatus"
   IPAMResponse:
     description: IPAM configuration of an endpoint
     type: object
@@ -1656,6 +1746,9 @@ definitions:
       bpf-maps:
         description: Status of BPF maps
         "$ref": "#/definitions/BPFMapStatus"
+      encryption:
+        description: Status of transparent encryption
+        "$ref": "#/definitions/EncryptionStatus"
   Status:
     description: Status of an individual component
     type: object
@@ -2418,6 +2511,98 @@ definitions:
     properties:
       realized:
         "$ref": "#/definitions/ServiceSpec"
+  Recorder:
+    description: Collection of wildcard filters for pcap recorder
+    type: object
+    properties:
+      spec:
+        "$ref": "#/definitions/RecorderSpec"
+      status:
+        "$ref": "#/definitions/RecorderStatus"
+  RecorderMask:
+    description: Individual mask for pcap recorder
+    type: object
+    properties:
+      status:
+        "$ref": "#/definitions/RecorderMaskStatus"
+  RecorderFilter:
+    description: n-tuple filter to match traffic to be recorded
+    type: object
+    properties:
+      src-prefix:
+        description: Layer 3 source CIDR
+        type: string
+      src-port:
+        description: Layer 4 source port, zero (or in future range)
+        type: string
+      dst-prefix:
+        description: Layer 3 destination CIDR
+        type: string
+      dst-port:
+        description: Layer 4 destination port, zero (or in future range)
+        type: string
+      protocol:
+        description: Layer 4 protocol
+        type: string
+        enum:
+        - TCP
+        - UDP
+        - ANY
+  RecorderSpec:
+    description: Configuration of a recorder
+    type: object
+    required:
+    - id
+    - filters
+    properties:
+      id:
+        description: Unique identification
+        type: integer
+      capture-length:
+        description: Maximum packet length or zero for full packet length
+        type: integer
+      filters:
+        description: List of wildcard filters for given recorder
+        type: array
+        items:
+          "$ref": "#/definitions/RecorderFilter"
+  RecorderMaskSpec:
+    description: Configuration of a recorder mask
+    type: object
+    properties:
+      users:
+        description: Number of users of this mask
+        type: integer
+      priority:
+        description: Priority of this mask
+        type: integer
+      src-prefix-mask:
+        description: Layer 3 source IP mask
+        type: string
+      src-port-mask:
+        description: Layer 4 source port mask
+        type: string
+      dst-prefix-mask:
+        description: Layer 3 destination IP mask
+        type: string
+      dst-port-mask:
+        description: Layer 4 destination port mask
+        type: string
+      protocol-mask:
+        description: Layer 4 protocol mask
+        type: string
+  RecorderStatus:
+    description: Configuration of a recorder
+    type: object
+    properties:
+      realized:
+        "$ref": "#/definitions/RecorderSpec"
+  RecorderMaskStatus:
+    description: Configuration of a recorder mask
+    type: object
+    properties:
+      realized:
+        "$ref": "#/definitions/RecorderMaskSpec"
   ProxyStatus:
     description: |-
       Status of proxy
@@ -2837,3 +3022,82 @@ definitions:
     type: array
     items:
       "$ref": "#/definitions/Port"
+  EncryptionStatus:
+    description: |-
+      Status of transparent encryption
+
+      +k8s:deepcopy-gen=true
+    properties:
+      mode:
+        type: string
+        enum:
+          - Disabled
+          - IPsec
+          - Wireguard
+      msg:
+        type: string
+        description: Human readable status/error/warning message
+      wireguard:
+        description: Status of the Wireguard agent
+        "$ref": "#/definitions/WireguardStatus"
+  WireguardStatus:
+    description: |-
+      Status of the Wireguard agent
+
+      +k8s:deepcopy-gen=true
+    properties:
+      interfaces:
+        description: Wireguard interfaces managed by this Cilium instance
+        type: array
+        items:
+          "$ref": "#/definitions/WireguardInterface"
+  WireguardInterface:
+    description: |-
+      Status of a Wireguard interface
+
+      +k8s:deepcopy-gen=true
+    properties:
+      name:
+        description: Name of the interface
+        type: string
+      public-key:
+        description: Public key of this interface
+        type: string
+      listen-port:
+        description: Port on which the Wireguard endpoint is exposed
+        type: integer
+      peer-count:
+        description: Number of peers configured on this interface
+        type: integer
+      peers:
+        description: Optional list of wireguard peers
+        type: array
+        items:
+          "$ref": "#/definitions/WireguardPeer"
+  WireguardPeer:
+    description: |-
+      Status of a Wireguard peer
+
+      +k8s:deepcopy-gen=true
+    properties:
+      public-key:
+        description: Public key of this peer
+        type: string
+      endpoint:
+        description: Endpoint on which we are connected to this peer
+        type: string
+      last-handshake-time:
+        description: Timestamp of the last handshake with this peer
+        type: string
+        format: date-time
+      transfer-tx:
+        description: Number of sent bytes
+        type: integer
+      transfer-rx:
+        description: Number of received bytes
+        type: integer
+      allowed-ips:
+        description: List of IPs which may be routed through this peer
+        type: array
+        items:
+          type: string

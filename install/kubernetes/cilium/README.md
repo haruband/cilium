@@ -27,7 +27,7 @@ Try Cilium on any Kubernetes distribution in under 15 minutes:
 
 | Minikube | Self-Managed K8s | Amazon EKS | Google GKE | Microsoft AKS |
 |:-:|:-:|:-:|:-:|:-:|
-| [![Minikube](https://raw.githubusercontent.com/cilium/charts/master/images/minikube.svg)](https://cilium.readthedocs.io/en/stable/gettingstarted/minikube/) | [![Self-Managed Kubernetes](https://raw.githubusercontent.com/cilium/charts/master/images/k8s.png)](https://cilium.readthedocs.io/en/stable/gettingstarted/k8s-install-self-managed/) | [![Amazon EKS](https://raw.githubusercontent.com/cilium/charts/master/images/aws.svg)](https://cilium.readthedocs.io/en/stable/gettingstarted/k8s-install-eks/) | [![Google GKE](https://raw.githubusercontent.com/cilium/charts/master/images/google-cloud.svg)](https://cilium.readthedocs.io/en/stable/gettingstarted/k8s-install-gke/) | [![Microsoft AKS](https://raw.githubusercontent.com/cilium/charts/master/images/azure.svg)](https://cilium.readthedocs.io/en/stable/gettingstarted/k8s-install-aks/) |
+| [![Minikube](https://raw.githubusercontent.com/cilium/charts/master/images/minikube.svg)](https://cilium.readthedocs.io/en/stable/gettingstarted/k8s-install-helm.html) | [![Self-Managed Kubernetes](https://raw.githubusercontent.com/cilium/charts/master/images/k8s.png)](https://cilium.readthedocs.io/en/stable/gettingstarted/k8s-install-helm.html | [![Amazon EKS](https://raw.githubusercontent.com/cilium/charts/master/images/aws.svg)](https://cilium.readthedocs.io/en/stable/gettingstarted/k8s-install-helm.html) | [![Google GKE](https://raw.githubusercontent.com/cilium/charts/master/images/google-cloud.svg)](https://cilium.readthedocs.io/en/stable/gettingstarted/k8s-install-helm.html) | [![Microsoft AKS](https://raw.githubusercontent.com/cilium/charts/master/images/azure.svg)](https://cilium.readthedocs.io/en/stable/gettingstarted/k8s-install-helm.html) |
 
 Or, for a quick install with the default configuration:
 
@@ -115,6 +115,7 @@ contributors across the globe, there is almost always someone available to help.
 | daemon.runPath | string | `"/var/run/cilium"` | Configure where Cilium runtime state should be stored. |
 | datapathMode | string | `"veth"` | Configure which datapath mode should be used for configuring container connectivity. Valid options are "veth" or "ipvlan". |
 | debug.enabled | bool | `false` | Enable debug logging |
+| egressGateway | object | `{"enabled":false}` | Enables egress gateway (beta) to redirect and SNAT the traffic that leaves the cluster. |
 | enableCnpStatusUpdates | bool | `false` | Specify which network interfaces can run the eBPF datapath. This means that a packet sent from a pod to a destination outside the cluster will be masqueraded (to an output device IPv4 address), if the output device runs the program. When not specified, probing will automatically detect devices. devices: "" TODO: Add documentation disableIptablesFeederRules: "" TODO: Add documentation egressMasqueradeInterfaces: "" |
 | enableCriticalPriorityClass | bool | `true` | Explicitly enable or disable priority class. .Capabilities.KubeVersion is unsettable in `helm template` calls, it depends on k8s libriaries version that Helm was compiled against. This option allows to explicitly disable setting the priority class, which is useful for rendering charts for gke clusters in advance. |
 | enableIPv4Masquerade | bool | `true` | hashSeed is the cluster-wide base64 encoded seed for the hashing hashSeed: -- Enables masquerading of IPv4 traffic leaving the node from endpoints. |
@@ -122,10 +123,11 @@ contributors across the globe, there is almost always someone available to help.
 | enableK8sEventHandover | bool | `false` | Configures the use of the KVStore to optimize Kubernetes event handling by mirroring it into the KVstore for reduced overhead in large clusters. |
 | enableXTSocketFallback | bool | `true` |  |
 | encryption.enabled | bool | `false` | Enable transparent network encryption. |
-| encryption.keyFile | string | `"keys"` | Name of the key file inside the Kubernetes secret configured via secretName. |
-| encryption.mountPath | string | `"/etc/ipsec"` | Path to mount the secret inside the Cilium pod. |
-| encryption.nodeEncryption | bool | `false` | Enable encryption for pure node to node traffic. |
-| encryption.secretName | string | `"cilium-ipsec-keys"` | Name of the Kubernetes secret containing the encryption keys. |
+| encryption.keyFile | string | `"keys"` | Name of the key file inside the Kubernetes secret configured via secretName. This option is only effective when encryption.type is set to ipsec. |
+| encryption.mountPath | string | `"/etc/ipsec"` | Path to mount the secret inside the Cilium pod. This option is only effective when encryption.type is set to ipsec. |
+| encryption.nodeEncryption | bool | `false` | Enable encryption for pure node to node traffic. This option is only effective when encryption.type is set to ipsec. |
+| encryption.secretName | string | `"cilium-ipsec-keys"` | Name of the Kubernetes secret containing the encryption keys. This option is only effective when encryption.type is set to ipsec. |
+| encryption.type | string | `"ipsec"` | Encryption method. Can be either ipsec or wireguard. |
 | endpointHealthChecking.enabled | bool | `true` |  |
 | endpointRoutes.enabled | bool | `false` | Enable use of per endpoint routes instead of routing via the cilium_host interface. |
 | eni.awsReleaseExcessIPs | bool | `false` | Release IPs not used from the ENI |
@@ -164,9 +166,6 @@ contributors across the globe, there is almost always someone available to help.
 | extraEnv | object | `{}` | Additional agent container environment variables |
 | extraHostPathMounts | list | `[]` | Additional agent hostPath mounts |
 | extraInitContainers | list | `[]` | Additional InitContainers to initialize the pod |
-| flannel.enabled | bool | `false` |  |
-| flannel.masterDevice | string | `"cni0"` |  |
-| flannel.uninstallOnExit | bool | `false` |  |
 | gke.enabled | bool | `false` | Enable Google Kubernetes Engine integration |
 | healthChecking | bool | `true` |  |
 | healthPort | int | `9876` | TCP port for the agent health API. This is not the port for cilium-health. |
@@ -221,7 +220,7 @@ contributors across the globe, there is almost always someone available to help.
 | hubble.ui.nodeSelector | object | `{}` | Node labels for pod assignment ref: https://kubernetes.io/docs/user-guide/node-selection/ |
 | hubble.ui.podAnnotations | object | `{}` | Annotations to be added to hubble-ui pods |
 | hubble.ui.podLabels | object | `{}` | Labels to be added to hubble-ui pods |
-| hubble.ui.proxy.image | object | `{"pullPolicy":"Always","repository":"docker.io/envoyproxy/envoy","tag":"v1.14.5"}` | Hubble-ui ingress proxy image. |
+| hubble.ui.proxy.image | object | `{"pullPolicy":"Always","repository":"docker.io/envoyproxy/envoy","tag":"v1.18.2"}` | Hubble-ui ingress proxy image. |
 | hubble.ui.proxy.resources | object | `{}` |  |
 | hubble.ui.replicas | int | `1` |  |
 | hubble.ui.rollOutPods | bool | `false` | Roll out Hubble-ui pods automatically when configmap is updated. |

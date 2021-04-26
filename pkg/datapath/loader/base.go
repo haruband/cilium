@@ -204,7 +204,8 @@ func (l *Loader) reinitializeIPSec(ctx context.Context) error {
 		if len(option.Config.IPv4PodSubnets) == 0 {
 			if info := node.GetRouterInfo(); info != nil {
 				for _, c := range info.GetIPv4CIDRs() {
-					option.Config.IPv4PodSubnets = append(option.Config.IPv4PodSubnets, &c)
+					cidr := c // create a copy to be able to take a reference
+					option.Config.IPv4PodSubnets = append(option.Config.IPv4PodSubnets, &cidr)
 				}
 			}
 		}
@@ -223,6 +224,25 @@ func (l *Loader) reinitializeIPSec(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func (l *Loader) reinitializeXDPLocked(ctx context.Context, extraCArgs []string) error {
+	maybeUnloadObsoleteXDPPrograms(option.Config.XDPDevice, option.Config.XDPMode)
+	if option.Config.XDPDevice != "undefined" {
+		if err := compileAndLoadXDPProg(ctx, option.Config.XDPDevice, option.Config.XDPMode, extraCArgs); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ReinitializeXDP (re-)configures the XDP datapath only. This includes recompilation
+// and reinsertion of the object into the kernel as well as an atomic program replacement
+// at the XDP hook. extraCArgs can be passed-in in order to alter BPF code defines.
+func (l *Loader) ReinitializeXDP(ctx context.Context, o datapath.BaseProgramOwner, extraCArgs []string) error {
+	o.GetCompilationLock().Lock()
+	defer o.GetCompilationLock().Unlock()
+	return l.reinitializeXDPLocked(ctx, extraCArgs)
 }
 
 // Reinitialize (re-)configures the base datapath configuration including global
@@ -326,8 +346,6 @@ func (l *Loader) Reinitialize(ctx context.Context, o datapath.BaseProgramOwner, 
 			devices = append(devices, link)
 		}
 		args[initArgDevices] = strings.Join(option.Config.Devices, ";")
-	} else if option.Config.IsFlannelMasterDeviceSet() {
-		args[initArgDevices] = option.Config.FlannelMasterDevice
 	} else {
 		args[initArgDevices] = "<nil>"
 	}
@@ -335,8 +353,6 @@ func (l *Loader) Reinitialize(ctx context.Context, o datapath.BaseProgramOwner, 
 	var mode baseDeviceMode
 	args[initArgTunnelMode] = "<nil>"
 	switch {
-	case option.Config.IsFlannelMasterDeviceSet():
-		mode = flannelMode
 	case option.Config.Tunnel != option.TunnelDisabled:
 		mode = tunnelMode
 		args[initArgTunnelMode] = option.Config.Tunnel
@@ -419,11 +435,9 @@ func (l *Loader) Reinitialize(ctx context.Context, o datapath.BaseProgramOwner, 
 	ctx, cancel := context.WithTimeout(ctx, defaults.ExecTimeout)
 	defer cancel()
 
-	maybeUnloadObsoleteXDPPrograms(option.Config.XDPDevice, option.Config.XDPMode)
-	if option.Config.XDPDevice != "undefined" {
-		if err := compileAndLoadXDPProg(ctx, option.Config.XDPDevice, option.Config.XDPMode); err != nil {
-			log.WithError(err).Fatal("Failed to compile XDP program")
-		}
+	extraArgs := []string{"-Dcapture_enabled=0"}
+	if err := l.reinitializeXDPLocked(ctx, extraArgs); err != nil {
+		log.WithError(err).Fatal("Failed to compile XDP program")
 	}
 
 	prog := filepath.Join(option.Config.BpfDir, "init.sh")

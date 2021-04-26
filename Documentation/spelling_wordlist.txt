@@ -1,4 +1,5 @@
 ACK
+AKS
 Admin
 Alemayhu
 Alibaba
@@ -186,6 +187,7 @@ Viljoen
 Virtualization
 Wakeup
 Wendlandt
+Wireguard
 Wireshark
 XDP
 Xenial
@@ -327,6 +329,7 @@ debuginfo
 decapsulate
 decapsulated
 decapsulation
+decrypt
 decrypted
 deletetopic
 demux

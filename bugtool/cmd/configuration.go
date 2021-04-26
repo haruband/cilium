@@ -108,7 +108,7 @@ func defaultCommands(confDir string, cmdDir string, k8sPods []string) []string {
 		"iptables-legacy-save -c",
 		// xfrm
 		"ip xfrm policy",
-		"ip -s xfrm state | awk '!/auth|enc|aead|auth-trunc|comp/'",
+		"ip -s xfrm state",
 		// gops
 		fmt.Sprintf("gops memstats $(pidof %s)", components.CiliumAgentName),
 		fmt.Sprintf("gops stack $(pidof %s)", components.CiliumAgentName),
@@ -302,6 +302,7 @@ func copyCiliumInfoCommands(cmdDir string, k8sPods []string) []string {
 		"cilium ip list -n -o json",
 		"cilium map list --verbose",
 		"cilium service list",
+		"cilium recorder list",
 		"cilium status --verbose",
 		"cilium identity list",
 		"cilium-health status",

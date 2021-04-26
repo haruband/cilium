@@ -23,12 +23,20 @@ Installation
    :maxdepth: 1
    :glob:
 
-   k8s-install-sandbox
-   k8s-install-self-managed
-   k8s-install-managed
-   k8s-installers
-   cni-chaining
-   external-workloads
+   k8s-install-default
+   k8s-install-helm
+   k8s-install-advanced
+
+Observability
+-------------
+
+.. toctree::
+   :maxdepth: 1
+   :glob:
+
+   hubble_setup
+   hubble_cli
+   hubble
 
 Network Policy Security Tutorials
 ---------------------------------
@@ -55,11 +63,9 @@ Advanced Networking
    :maxdepth: 1
    :glob:
 
-   aws-eni
    alibabacloud-eni
    kube-router
    bird
-   flannel-integration
    ipvlan
    encryption
    host-services
@@ -68,6 +74,7 @@ Advanced Networking
    kata
    ipam
    local-redirect-policy
+   bgp
 
 Cluster Mesh
 ------------
@@ -79,6 +86,7 @@ Cluster Mesh
    clustermesh/clustermesh
    clustermesh/services
    clustermesh/policy
+   external-workloads
 
 Operations
 ----------
@@ -87,7 +95,6 @@ Operations
    :maxdepth: 1
    :glob:
 
-   hubble
    grafana
 
 Istio

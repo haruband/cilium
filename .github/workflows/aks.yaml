@@ -1,12 +1,12 @@
-name: ConformanceAKS
+name: ConformanceAKS (ci-aks)
 
 on:
   issue_comment:
     types:
       - created
-  push:
-    branches:
-      - master
+  # Run every 6 hours
+  schedule:
+    - cron:  '0 0/6 * * *'
   ### FOR TESTING PURPOSES
   # pull_request:
   #  types:
@@ -20,7 +20,13 @@ env:
 
 jobs:
   installation-and-connectivity:
-    if: ${{ (github.event.issue.pull_request && startsWith(github.event.comment.body, 'ci-aks')) || github.event_name == 'push' || github.event.label.name == 'ci-run/aks' }}
+    if: |
+      (github.event.issue.pull_request && (
+        startsWith(github.event.comment.body, 'ci-aks') ||
+        startsWith(github.event.comment.body, 'test-me-please')
+      )) ||
+      github.event_name == 'schedule' ||
+      github.event.label.name == 'ci-run/aks'
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
@@ -32,19 +38,28 @@ jobs:
               -H "Accept: application/vnd.github.v3+json" \
               -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
               ${{ github.event.issue.pull_request.url || github.event.pull_request.url }})
-            PR_SHA=$(echo "$PR_API_JSON" | jq -r ".head.sha")
-            PR_NUMBER=$(echo "$PR_API_JSON" | jq -r ".number")
-            echo ::set-output name=is_pr::true
-            echo ::set-output name=sha::${PR_SHA}
-            echo ::set-output name=owner::${PR_NUMBER}
+            SHA=$(echo "$PR_API_JSON" | jq -r ".head.sha")
+            OWNER=$(echo "$PR_API_JSON" | jq -r ".number")
           else
-            echo ::set-output name=is_pr::
-            echo ::set-output name=sha::${{ github.sha }}
-            echo ::set-output name=owner::${{ github.sha }}
+            SHA=${{ github.sha }}
+            OWNER=${{ github.sha }}
           fi
 
-      - name: Set PR status check to pending
-        if: ${{ steps.vars.outputs.is_pr }}
+          CILIUM_INSTALL_DEFAULTS="--cluster-name=${{ env.name }} \
+            --agent-image=quay.io/${{ github.repository_owner }}/cilium-ci \
+            --operator-image=quay.io/${{ github.repository_owner }}/operator-azure-ci \
+            --version=${SHA} \
+            --azure-resource-group ${{ env.name }} \
+            --azure-tenant-id ${{ secrets.AZURE_PR_SP_TENANT_ID }} \
+            --azure-client-id ${{ secrets.AZURE_PR_SP_CLIENT_ID }} \
+            --azure-client-secret ${{ secrets.AZURE_PR_SP_CLIENT_SECRET }} \
+            --wait=false \
+            --config monitor-aggregation=none"
+          echo ::set-output name=cilium_install_defaults::${CILIUM_INSTALL_DEFAULTS}
+          echo ::set-output name=sha::${SHA}
+          echo ::set-output name=owner::${OWNER}
+
+      - name: Set commit status to pending
         uses: Sibz/github-status-action@67af1f4042a5a790681aad83c44008ca6cfab83d
         with:
           authToken: ${{ secrets.GITHUB_TOKEN }}
@@ -83,8 +98,11 @@ jobs:
             --name ${{ env.name }} \
             --location ${{ env.location }} \
             --network-plugin azure \
-            --generate-ssh-keys \
-            --node-count 2
+            --node-count 2 \
+            --node-vm-size Standard_B2s \
+            --node-osdisk-size 30 \
+            --load-balancer-sku basic \
+            --generate-ssh-keys
 
       - name: Get cluster credentials
         run: |
@@ -101,17 +119,7 @@ jobs:
 
       - name: Install Cilium
         run: |
-          cilium install \
-            --cluster-name ${{ env.name }} \
-            --wait=false \
-            --config monitor-aggregation=none \
-            --azure-resource-group ${{ env.name }} \
-            --azure-tenant-id ${{ secrets.AZURE_PR_SP_TENANT_ID}} \
-            --azure-client-id ${{ secrets.AZURE_PR_SP_CLIENT_ID }} \
-            --azure-client-secret ${{ secrets.AZURE_PR_SP_CLIENT_SECRET }} \
-            --agent-image=quay.io/${{ github.repository_owner }}/cilium-ci \
-            --operator-image=quay.io/${{ github.repository_owner }}/operator-azure-ci \
-            --version ${{ steps.vars.outputs.sha }}
+          cilium install ${{ steps.vars.outputs.cilium_install_defaults }}
 
       - name: Enable Relay
         run: |
@@ -124,7 +132,7 @@ jobs:
       - name: Port forward Relay
         run: |
           kubectl port-forward -n kube-system deployment/hubble-relay 4245:4245&
-          sleep 5s
+          sleep 10s
 
       - name: Run connectivity test
         run: |
@@ -135,20 +143,10 @@ jobs:
           cilium uninstall --wait
           pgrep -f "kubectl port-forward" | xargs kill -9 # kill background port forwards
 
-      - name: Install Cilium with encryption enabled
+      - name: Install Cilium with encryption
         run: |
-          cilium install \
-            --encryption \
-            --cluster-name ${{ env.name }} \
-            --wait=false \
-            --config monitor-aggregation=none \
-            --azure-resource-group ${{ env.name }} \
-            --azure-tenant-id ${{ secrets.AZURE_PR_SP_TENANT_ID}} \
-            --azure-client-id ${{ secrets.AZURE_PR_SP_CLIENT_ID }} \
-            --azure-client-secret ${{ secrets.AZURE_PR_SP_CLIENT_SECRET }} \
-            --agent-image=quay.io/${{ github.repository_owner }}/cilium-ci \
-            --operator-image=quay.io/${{ github.repository_owner }}/operator-azure-ci \
-            --version ${{ steps.vars.outputs.sha }}
+          cilium install ${{ steps.vars.outputs.cilium_install_defaults }} \
+            --encryption
 
       - name: Enable Relay
         run: |
@@ -161,7 +159,7 @@ jobs:
       - name: Port forward Relay
         run: |
           kubectl port-forward -n kube-system deployment/hubble-relay 4245:4245&
-          sleep 5s
+          sleep 10s
 
       - name: Restart connectivity test pods
         run: |
@@ -195,8 +193,8 @@ jobs:
           path: cilium-sysdump-out.zip
           retention-days: 5
 
-      - name: Set PR status check to success
-        if: ${{ steps.vars.outputs.is_pr && success() }}
+      - name: Set commit status to success
+        if: ${{ success() }}
         uses: Sibz/github-status-action@67af1f4042a5a790681aad83c44008ca6cfab83d
         with:
           authToken: ${{ secrets.GITHUB_TOKEN }}
@@ -206,8 +204,8 @@ jobs:
           state: success
           target_url: ${{ env.check_url }}
 
-      - name: Set PR status check to failure
-        if: ${{ steps.vars.outputs.is_pr && failure() }}
+      - name: Set commit status to failure
+        if: ${{ failure() }}
         uses: Sibz/github-status-action@67af1f4042a5a790681aad83c44008ca6cfab83d
         with:
           authToken: ${{ secrets.GITHUB_TOKEN }}
@@ -217,8 +215,8 @@ jobs:
           state: failure
           target_url: ${{ env.check_url }}
 
-      - name: Set PR status check to cancelled
-        if: ${{ steps.vars.outputs.is_pr && cancelled() }}
+      - name: Set commit status to cancelled
+        if: ${{ cancelled() }}
         uses: Sibz/github-status-action@67af1f4042a5a790681aad83c44008ca6cfab83d
         with:
           authToken: ${{ secrets.GITHUB_TOKEN }}

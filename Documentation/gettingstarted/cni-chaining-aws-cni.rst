@@ -4,6 +4,8 @@
     Please use the official rendered version released here:
     https://docs.cilium.io
 
+.. _chaining_aws_cni:
+
 *******
 AWS-CNI
 *******
@@ -29,7 +31,7 @@ load-balancing, and encryption.
 Setup Cluster on AWS
 ====================
 
-Follow the instructions in the :ref:`k8s_install_eks` guide to set up an EKS
+Follow the instructions in the :ref:`k8s_install_quick` guide to set up an EKS
 cluster or use any other method of your preference to set up a Kubernetes
 cluster.
 
@@ -68,6 +70,5 @@ If you are unsure if a pod is managed by Cilium or not, run ``kubectl get cep``
 in the respective namespace and see if the pod is listed.
 
 .. include:: k8s-install-validate.rst
-.. include:: namespace-kube-system.rst
-.. include:: hubble-enable.rst
 
+.. include:: next-steps.rst

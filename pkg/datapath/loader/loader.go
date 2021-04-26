@@ -16,12 +16,14 @@ package loader
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
 	"path"
 	"reflect"
 	"sync"
+	"syscall"
 
 	"github.com/cilium/cilium/pkg/bpf"
 	"github.com/cilium/cilium/pkg/byteorder"
@@ -286,10 +288,9 @@ func (l *Loader) reloadHostDatapath(ctx context.Context, ep datapath.Endpoint, o
 }
 
 func datapathHasMultipleMasterDevices() bool {
-	// In Flannel's case or when using ipvlan, HOST_DEV2 is equal to HOST_DEV1
-	// in init.sh and we have a single master device.
-	return option.Config.DatapathMode != datapathOption.DatapathModeIpvlan &&
-		!option.Config.IsFlannelMasterDeviceSet()
+	// When using ipvlan, HOST_DEV2 is equal to HOST_DEV1 in init.sh and we
+	// have a single master device.
+	return option.Config.DatapathMode != datapathOption.DatapathModeIpvlan
 }
 
 func (l *Loader) reloadDatapath(ctx context.Context, ep datapath.Endpoint, dirs *directoryInfo) error {
@@ -360,7 +361,7 @@ func (l *Loader) reloadDatapath(ctx context.Context, ep datapath.Endpoint, dirs 
 				scopedLog.WithError(err).Warn("Failed to upsert route")
 			}
 		} else {
-			if err := removeEndpointRoute(ep, *ip.IPNet(32)); err != nil {
+			if err := removeEndpointRoute(ep, *ip.IPNet(32)); err != nil && !errors.Is(err, syscall.ESRCH) {
 				scopedLog.WithError(err).Warn("Failed to remove route")
 			}
 		}
@@ -375,7 +376,7 @@ func (l *Loader) reloadDatapath(ctx context.Context, ep datapath.Endpoint, dirs 
 				scopedLog.WithError(err).Warn("Failed to upsert route")
 			}
 		} else {
-			if err := removeEndpointRoute(ep, *ip.IPNet(128)); err != nil {
+			if err := removeEndpointRoute(ep, *ip.IPNet(128)); err != nil && !errors.Is(err, syscall.ESRCH) {
 				scopedLog.WithError(err).Warn("Failed to remove route")
 			}
 		}
