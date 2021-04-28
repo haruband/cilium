@@ -1,6 +1,7 @@
 #!/bin/bash
 
 sudo mkdir -p /etc/sysconfig/
+sudo cp cilium.cfg /etc/sysconfig/cilium
 sudo cp contrib/systemd/cilium.service /etc/systemd/system/
 sudo cp contrib/systemd/cilium-operator.service /etc/systemd/system/
 sudo cp contrib/systemd/cilium-docker.service /etc/systemd/system/
