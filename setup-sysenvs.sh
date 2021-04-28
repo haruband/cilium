@@ -1,12 +1,11 @@
 #!/bin/bash
 
 sudo mkdir -p /etc/sysconfig/
-sudo cp cilium.cfg /etc/sysconfig/cilium
 sudo cp contrib/systemd/cilium.service /etc/systemd/system/
 sudo cp contrib/systemd/cilium-operator.service /etc/systemd/system/
 sudo cp contrib/systemd/cilium-docker.service /etc/systemd/system/
 sudo cp contrib/systemd/cilium-consul.service /etc/systemd/system/
-sudo cp contrib/systemd/cilium /etc/sysconfig/cilium
+sudo cp cilium.cfg /etc/sysconfig/cilium
 sudo usermod -a -G cilium $(whoami)
 sudo systemctl enable cilium-docker
 sudo systemctl restart cilium-docker
