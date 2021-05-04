@@ -36,7 +36,9 @@ import (
 	v1 "k8s.io/api/core/v1"
 )
 
-var _ = Describe("K8sServicesTest", func() {
+// The 5.4 CI job is intended to catch BPF complexity regressions and as such
+// doesn't need to execute this test suite.
+var _ = SkipDescribeIf(helpers.RunsOn54Kernel, "K8sServicesTest", func() {
 	var (
 		kubectl        *helpers.Kubectl
 		ciliumFilename string
@@ -310,16 +312,20 @@ var _ = Describe("K8sServicesTest", func() {
 			echoSVCYAML          string
 			echoSVCYAMLV6        string
 			echoSVCYAMLDualStack string
+			echoPolicyYAML       string
 		)
 
 		BeforeAll(func() {
 			demoYAML = helpers.ManifestGet(kubectl.BasePath(), "demo.yaml")
 			echoSVCYAML = helpers.ManifestGet(kubectl.BasePath(), "echo-svc.yaml")
+			echoPolicyYAML = helpers.ManifestGet(kubectl.BasePath(), "echo-policy.yaml")
 
 			res := kubectl.ApplyDefault(demoYAML)
 			Expect(res).Should(helpers.CMDSuccess(), "unable to apply %s", demoYAML)
 			res = kubectl.ApplyDefault(echoSVCYAML)
 			Expect(res).Should(helpers.CMDSuccess(), "unable to apply %s", echoSVCYAML)
+			res = kubectl.ApplyDefault(echoPolicyYAML)
+			Expect(res).Should(helpers.CMDSuccess(), "unable to apply %s", echoPolicyYAML)
 
 			if helpers.DualStackSupported() {
 				demoYAMLV6 = helpers.ManifestGet(kubectl.BasePath(), "demo_v6.yaml")
@@ -351,6 +357,7 @@ var _ = Describe("K8sServicesTest", func() {
 			// teardown if any step fails.
 			_ = kubectl.Delete(demoYAML)
 			_ = kubectl.Delete(echoSVCYAML)
+			_ = kubectl.Delete(echoPolicyYAML)
 			if helpers.DualStackSupported() {
 				_ = kubectl.Delete(demoYAMLV6)
 				_ = kubectl.Delete(echoSVCYAMLV6)
@@ -579,9 +586,56 @@ var _ = Describe("K8sServicesTest", func() {
 				testCurlFromPods(echoPodLabel, url, 5, 0)
 			}
 		})
+
+		curlClusterIPFromExternalHost := func() *helpers.CmdRes {
+			clusterIP, _, err := kubectl.GetServiceHostPort(helpers.DefaultNamespace, serviceName)
+			ExpectWithOffset(1, err).Should(BeNil(), "Cannot get service %s", serviceName)
+			ExpectWithOffset(1, govalidator.IsIP(clusterIP)).Should(BeTrue(), "ClusterIP is not an IP")
+			httpSVCURL := fmt.Sprintf("http://%s/", net.JoinHostPort(clusterIP, "80"))
+
+			By("testing external connectivity via cluster IP %s", clusterIP)
+
+			status := kubectl.ExecInHostNetNS(context.TODO(), k8s1NodeName, helpers.CurlFail(httpSVCURL))
+			ExpectWithOffset(1, status).Should(helpers.CMDSuccess(), "cannot curl to service IP from host: %s", status.CombineOutput())
+
+			return kubectl.ExecInHostNetNS(context.TODO(), outsideNodeName, helpers.CurlFail(httpSVCURL))
+		}
+
+		SkipItIf(func() bool { return helpers.DoesNotExistNodeWithoutCilium() },
+			"ClusterIP cannot be accessed externally when access is disabled",
+			func() {
+				Expect(curlClusterIPFromExternalHost()).ShouldNot(helpers.CMDSuccess(),
+					"External host %s unexpectedly connected to ClusterIP when lbExternalClusterIP was unset", outsideNodeName)
+			})
+
+		SkipContextIf(func() bool { return helpers.DoesNotExistNodeWithoutCilium() }, "With ClusterIP external access", func() {
+			var (
+				svcIP string
+			)
+			BeforeAll(func() {
+				DeployCiliumOptionsAndDNS(kubectl, ciliumFilename, map[string]string{
+					"bpf.lbExternalClusterIP": "true",
+				})
+				clusterIP, _, err := kubectl.GetServiceHostPort(helpers.DefaultNamespace, serviceName)
+				svcIP = clusterIP
+				Expect(err).Should(BeNil(), "Cannot get service %s", serviceName)
+				res := kubectl.AddIPRoute(outsideNodeName, svcIP, k8s1IP, false)
+				Expect(res).Should(helpers.CMDSuccess(), "Error adding IP route for %s via %s", svcIP, k8s1IP)
+			})
+
+			AfterAll(func() {
+				res := kubectl.DelIPRoute(outsideNodeName, svcIP, k8s1IP)
+				Expect(res).Should(helpers.CMDSuccess(), "Error removing IP route for %s via %s", svcIP, k8s1IP)
+				DeployCiliumAndDNS(kubectl, ciliumFilename)
+			})
+
+			It("ClusterIP can be accessed when external access is enabled", func() {
+				Expect(curlClusterIPFromExternalHost()).Should(helpers.CMDSuccess(), "Could not curl ClusterIP %s from external host", svcIP)
+			})
+		})
 	})
 
-	SkipContextIf(func() bool { return !helpers.RunsOnNetNextOr419Kernel() }, "Checks local redirect policy", func() {
+	SkipContextIf(func() bool { return !helpers.RunsOn419OrLaterKernel() }, "Checks local redirect policy", func() {
 		const (
 			lrpServiceName = "lrp-demo-service"
 			be1Name        = "k8s1-backend"
@@ -1980,7 +2034,7 @@ Secondary Interface %s :: IPv4: (%s, %s), IPv6: (%s, %s)`, helpers.DualStackSupp
 		})
 
 		SkipContextIf(helpers.RunsWithKubeProxyReplacement, "Tests NodePort (kube-proxy)", func() {
-			SkipItIf(helpers.DoesNotRunOnNetNextOr419Kernel, "with IPSec and externalTrafficPolicy=Local", func() {
+			SkipItIf(helpers.DoesNotRunOn419OrLaterKernel, "with IPSec and externalTrafficPolicy=Local", func() {
 				deploymentManager.SetKubectl(kubectl)
 				deploymentManager.Deploy(helpers.CiliumNamespace, IPSecSecret)
 				DeployCiliumOptionsAndDNS(kubectl, ciliumFilename, map[string]string{
@@ -2860,9 +2914,16 @@ Secondary Interface %s :: IPv4: (%s, %s), IPv6: (%s, %s)`, helpers.DualStackSupp
 		// Run on net-next and 4.19 but not on old versions, because of
 		// LRU requirement.
 		SkipItIf(func() bool {
-			return helpers.DoesNotRunOnNetNextOr419Kernel() || helpers.RunsOnGKE()
+			return helpers.DoesNotRunOn419OrLaterKernel()
 		}, "Supports IPv4 fragments", func() {
-			DeployCiliumAndDNS(kubectl, ciliumFilename)
+			options := map[string]string{}
+			// On GKE we need to disable endpoint routes as fragment tracking
+			// isn't compatible with that options. See #15958.
+			if helpers.RunsOnGKE() {
+				options["gke.enabled"] = "false"
+				options["tunnel"] = "disabled"
+			}
+			DeployCiliumOptionsAndDNS(kubectl, ciliumFilename, options)
 			testIPv4FragmentSupport()
 		})
 	})
