@@ -34,6 +34,7 @@ import (
 	datapathOption "github.com/cilium/cilium/pkg/datapath/option"
 	"github.com/cilium/cilium/pkg/defaults"
 	"github.com/cilium/cilium/pkg/identity"
+	ipamOption "github.com/cilium/cilium/pkg/ipam/option"
 	"github.com/cilium/cilium/pkg/labels"
 	"github.com/cilium/cilium/pkg/mac"
 	"github.com/cilium/cilium/pkg/maglev"
@@ -453,30 +454,23 @@ func (h *HeaderfileWriter) WriteNodeConfig(w io.Writer, cfg *datapath.LocalNodeC
 		cDefinesMap["ENABLE_HOST_FIREWALL"] = "1"
 	}
 
-	if iface := option.Config.EncryptInterface; len(iface) != 0 {
-		// When FIB lookup is not supported (older kernels)  we need to
-		// pick an interface so pick first interface in list. Then we pick
-		// an IPv4 address to use by selecting link IPAddr. In case with
-		// kernel support, the kernel datapath will use the FIB lookup helper
-		// and this define is ignored.
-		link, err := netlink.LinkByName(iface[0])
-		if err == nil {
-			cDefinesMap["ENCRYPT_IFACE"] = fmt.Sprintf("%d", link.Attrs().Index)
-
-			addr, err := netlink.AddrList(link, netlink.FAMILY_V4)
-			if err != nil {
-				return err
+	if option.Config.EnableIPSec {
+		a := byteorder.HostSliceToNetwork(node.GetIPv4(), reflect.Uint32).(uint32)
+		cDefinesMap["IPV4_ENCRYPT_IFACE"] = fmt.Sprintf("%d", a)
+		if iface := option.Config.EncryptInterface; len(iface) != 0 {
+			link, err := netlink.LinkByName(iface[0])
+			if err == nil {
+				cDefinesMap["ENCRYPT_IFACE"] = fmt.Sprintf("%d", link.Attrs().Index)
 			}
-			if len(addr) == 0 {
-				return fmt.Errorf("no IPv4 addresses available in encrypt interface %q", iface)
-			}
-			a := byteorder.HostSliceToNetwork(addr[0].IPNet.IP, reflect.Uint32).(uint32)
-			cDefinesMap["IPV4_ENCRYPT_IFACE"] = fmt.Sprintf("%d", a)
+		}
+		// If we are using IPAMENI always use IP_POOLS datapath, the pod subnets
+		// will be auto-discovered later at runtime.
+		if (option.Config.IPAM == ipamOption.IPAMENI) ||
+			option.Config.IsPodSubnetsDefined() {
+			cDefinesMap["IP_POOLS"] = "1"
 		}
 	}
-	if option.Config.IsPodSubnetsDefined() {
-		cDefinesMap["IP_POOLS"] = "1"
-	}
+
 	if option.Config.EnableNodePort {
 		if option.Config.EnableIPv4 {
 			cDefinesMap["SNAT_MAPPING_IPV4"] = nat.MapNameSnat4Global

@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"reflect"
 
 	"github.com/cilium/cilium/pkg/cidr"
 	"github.com/cilium/cilium/pkg/counter"
@@ -29,11 +30,13 @@ import (
 	"github.com/cilium/cilium/pkg/datapath/linux/ipsec"
 	"github.com/cilium/cilium/pkg/datapath/linux/linux_defaults"
 	"github.com/cilium/cilium/pkg/datapath/linux/route"
+	ipamOption "github.com/cilium/cilium/pkg/ipam/option"
 	"github.com/cilium/cilium/pkg/lock"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/maps/neighborsmap"
 	"github.com/cilium/cilium/pkg/maps/tunnel"
 	"github.com/cilium/cilium/pkg/metrics"
+	"github.com/cilium/cilium/pkg/node"
 	nodeTypes "github.com/cilium/cilium/pkg/node/types"
 	"github.com/cilium/cilium/pkg/option"
 
@@ -57,6 +60,7 @@ type linuxNodeHandler struct {
 	datapathConfig       DatapathConfiguration
 	nodes                map[nodeTypes.Identity]*nodeTypes.Node
 	enableNeighDiscovery bool
+	neighLock            lock.Mutex // protects neigh* fields below
 	neighDiscoveryLink   netlink.Link
 	neighNextHopByNode   map[nodeTypes.Identity]string // val = string(net.IP)
 	neighNextHopRefCount counter.StringCounter
@@ -628,7 +632,7 @@ func (n *linuxNodeHandler) encryptNode(newNode *nodeTypes.Node) {
 
 }
 
-func (n *linuxNodeHandler) getSrcAndNextHopIPv4(nodeIPv4 net.IP) (srcIPv4, nextHopIPv4 net.IP, err error) {
+func getSrcAndNextHopIPv4(nodeIPv4 net.IP) (srcIPv4, nextHopIPv4 net.IP, err error) {
 	// Figure out whether nodeIPv4 is directly reachable (i.e. in the same L2)
 	routes, err := netlink.RouteGet(nodeIPv4)
 	if err != nil {
@@ -666,12 +670,16 @@ func (n *linuxNodeHandler) getSrcAndNextHopIPv4(nodeIPv4 net.IP) (srcIPv4, nextH
 // which tries to update ARP entries previously inserted by insertNeighbor(). In
 // this case it does not bail out early if the ARP entry already exists, and
 // sends the ARP request anyway.
-//
-// The method must be called with linuxNodeHandler.mutex held.
 func (n *linuxNodeHandler) insertNeighbor(ctx context.Context, newNode *nodeTypes.Node, refresh bool) {
-	if newNode.IsLocal() {
+	var link netlink.Link
+	n.neighLock.Lock()
+	if n.neighDiscoveryLink == nil || reflect.ValueOf(n.neighDiscoveryLink).IsNil() {
+		n.neighLock.Unlock()
+		// Nothing to do - the discovery link was not set yet
 		return
 	}
+	link = n.neighDiscoveryLink
+	n.neighLock.Unlock()
 
 	newNodeIP := newNode.GetNodeIP(false).To4()
 	nextHopIPv4 := make(net.IP, len(newNodeIP))
@@ -679,33 +687,29 @@ func (n *linuxNodeHandler) insertNeighbor(ctx context.Context, newNode *nodeType
 
 	scopedLog := log.WithFields(logrus.Fields{
 		logfields.LogSubsys: "node-neigh-debug",
-		logfields.Interface: n.neighDiscoveryLink.Attrs().Name,
+		logfields.Interface: link.Attrs().Name,
 	})
 
-	srcIPv4, nextHopIPv4, err := n.getSrcAndNextHopIPv4(nextHopIPv4)
+	srcIPv4, nextHopIPv4, err := getSrcAndNextHopIPv4(nextHopIPv4)
 	if err != nil {
 		scopedLog.WithError(err).Info("Unable to determine source and nexthop IP addr")
 		return
 	}
+	nextHopStr := nextHopIPv4.String()
 
 	scopedLog = scopedLog.WithField(logfields.IPAddr, nextHopIPv4)
 
-	nextHopStr := nextHopIPv4.String()
+	n.neighLock.Lock()
+
+	nextHopIsNew := false
 	if existingNextHopStr, found := n.neighNextHopByNode[newNode.Identity()]; found {
-		if existingNextHopStr == nextHopStr {
-			// We already know about the nextHop of the given newNode. Can happen
-			// when insertNeighbor is called by NodeUpdate multiple times for
-			// the same node.
-			if !refresh {
-				// In the case of refresh, don't return early, as we want to
-				// update the related neigh entry even if the nextHop is the same
-				// (e.g. to detect the GW MAC addr change).
-				return
-			}
-		} else if n.neighNextHopRefCount.Delete(existingNextHopStr) {
+		if existingNextHopStr != nextHopStr && n.neighNextHopRefCount.Delete(existingNextHopStr) {
 			// nextHop has changed and nobody else is using it, so remove the old one.
 			neigh, found := n.neighByNextHop[existingNextHopStr]
 			if found {
+				// Note that we don't move the removal via netlink which might
+				// block from the hot path (e.g. with defer), as this case can
+				// happen very rarely.
 				if err := netlink.NeighDel(neigh); err != nil {
 					scopedLog.WithFields(logrus.Fields{
 						logfields.IPAddr:       neigh.IP,
@@ -719,25 +723,34 @@ func (n *linuxNodeHandler) insertNeighbor(ctx context.Context, newNode *nodeType
 				}
 			}
 		}
+	} else {
+		// nextHop for the given node was previously not found, so let's
+		// increment ref counter.  This can happen upon regular NodeUpdate event
+		// or by the periodic ARP refresher which got executed before
+		// NodeUpdate().
+		nextHopIsNew = n.neighNextHopRefCount.Add(nextHopStr)
 	}
 
 	n.neighNextHopByNode[newNode.Identity()] = nextHopStr
 
-	nextHopIsNew := false
-	if !refresh {
-		nextHopIsNew = n.neighNextHopRefCount.Add(nextHopStr)
-	}
+	n.neighLock.Unlock() // to allow concurrent arpings below
 
 	// nextHop hasn't been arpinged before OR we are refreshing neigh entry
+	var hwAddr net.HardwareAddr
 	if nextHopIsNew || refresh {
-		hwAddr, err := arp.PingOverLink(n.neighDiscoveryLink, srcIPv4, nextHopIPv4)
+		hwAddr, err = arp.PingOverLink(link, srcIPv4, nextHopIPv4)
 		if err != nil {
-			scopedLog.WithError(err).Info("arping failed")
+			scopedLog.WithError(err).Debug("arping failed")
 			metrics.ArpingRequestsTotal.WithLabelValues(failed).Inc()
 			return
 		}
 		metrics.ArpingRequestsTotal.WithLabelValues(success).Inc()
+	}
 
+	n.neighLock.Lock()
+	defer n.neighLock.Unlock()
+
+	if hwAddr != nil {
 		if prevHwAddr, found := n.neighByNextHop[nextHopStr]; found && prevHwAddr.String() == hwAddr.String() {
 			// Nothing to update, return early to avoid calling to netlink. This
 			// is based on the assumption that n.neighByNextHop gets populated
@@ -746,18 +759,16 @@ func (n *linuxNodeHandler) insertNeighbor(ctx context.Context, newNode *nodeType
 		}
 
 		if option.Config.NodePortHairpin {
-			defer func() {
-				// Remove nextHopIPv4 entry in the neigh BPF map. Otherwise,
-				// we risk to silently blackhole packets instead of emitting
-				// DROP_NO_FIB if the netlink.NeighSet() below fails.
-				neighborsmap.NeighRetire(nextHopIPv4)
-			}()
+			// Remove nextHopIPv4 entry in the neigh BPF map. Otherwise,
+			// we risk to silently blackhole packets instead of emitting
+			// DROP_NO_FIB if the netlink.NeighSet() below fails.
+			defer neighborsmap.NeighRetire(nextHopIPv4)
 		}
 
 		scopedLog = scopedLog.WithField(logfields.HardwareAddr, hwAddr)
 
 		neigh := netlink.Neigh{
-			LinkIndex:    n.neighDiscoveryLink.Attrs().Index,
+			LinkIndex:    link.Attrs().Index,
 			IP:           nextHopIPv4,
 			HardwareAddr: hwAddr,
 			State:        netlink.NUD_PERMANENT,
@@ -779,14 +790,13 @@ func (n *linuxNodeHandler) insertNeighbor(ctx context.Context, newNode *nodeType
 func (n *linuxNodeHandler) refreshNeighbor(ctx context.Context, nodeToRefresh *nodeTypes.Node, completed chan struct{}) {
 	defer close(completed)
 
-	n.mutex.Lock()
-	defer n.mutex.Unlock()
-
 	n.insertNeighbor(ctx, nodeToRefresh, true)
 }
 
-// Must be called with linuxNodeHandler.mutex held.
 func (n *linuxNodeHandler) deleteNeighbor(oldNode *nodeTypes.Node) {
+	n.neighLock.Lock()
+	defer n.neighLock.Unlock()
+
 	nextHopStr, found := n.neighNextHopByNode[oldNode.Identity()]
 	if !found {
 		return
@@ -794,6 +804,7 @@ func (n *linuxNodeHandler) deleteNeighbor(oldNode *nodeTypes.Node) {
 	defer func() { delete(n.neighNextHopByNode, oldNode.Identity()) }()
 
 	if n.neighNextHopRefCount.Delete(nextHopStr) {
+
 		neigh, found := n.neighByNextHop[nextHopStr]
 		delete(n.neighByNextHop, nextHopStr)
 
@@ -902,8 +913,12 @@ func (n *linuxNodeHandler) nodeUpdate(oldNode, newNode *nodeTypes.Node, firstAdd
 		newKey = newNode.EncryptionKey
 	}
 
-	if n.enableNeighDiscovery {
-		n.insertNeighbor(context.Background(), newNode, false)
+	if n.enableNeighDiscovery && !newNode.IsLocal() {
+		// Running insertNeighbor in a separate goroutine relies on the following
+		// assumptions:
+		// 1. newNode is accessed only by reads.
+		// 2. It is safe to invoke insertNeighbor for the same node.
+		go n.insertNeighbor(context.Background(), newNode, false)
 	}
 
 	if n.nodeConfig.EnableIPSec && !n.subnetEncryption() {
@@ -1009,7 +1024,7 @@ func (n *linuxNodeHandler) nodeDelete(oldNode *nodeTypes.Node) error {
 	}
 
 	if n.enableNeighDiscovery {
-		n.deleteNeighbor(oldNode)
+		go n.deleteNeighbor(oldNode)
 	}
 
 	if n.nodeConfig.EnableIPSec {
@@ -1349,13 +1364,30 @@ func (n *linuxNodeHandler) NodeConfigurationChanged(newConfig datapath.LocalNode
 				return fmt.Errorf("cannot find link by name %s for neigh discovery: %w",
 					ifaceName, err)
 			}
+			// neighDiscoveryLink can be accessed by a concurrent insertNeighbor
+			// goroutine.
+			n.neighLock.Lock()
 			n.neighDiscoveryLink = link
+			n.neighLock.Unlock()
 		}
 	}
 
 	n.updateOrRemoveNodeRoutes(prevConfig.AuxiliaryPrefixes, newConfig.AuxiliaryPrefixes, true)
 
 	if newConfig.EnableIPSec {
+		// For the ENI ipam mode on EKS, this will be the interface that
+		// the router (cilium_host) IP is associated to.
+		if option.Config.IPAM == ipamOption.IPAMENI && len(option.Config.IPv4PodSubnets) == 0 {
+			if info := node.GetRouterInfo(); info != nil {
+				var ipv4PodSubnets []*net.IPNet
+				for _, c := range info.GetIPv4CIDRs() {
+					cidr := c // create a copy to be able to take a reference
+					ipv4PodSubnets = append(ipv4PodSubnets, &cidr)
+				}
+				n.nodeConfig.IPv4PodSubnets = ipv4PodSubnets
+			}
+		}
+
 		if err := n.replaceHostRules(); err != nil {
 			log.WithError(err).Warning("Cannot replace Host rules")
 		}
@@ -1416,13 +1448,9 @@ func (n *linuxNodeHandler) NodeNeighborRefresh(ctx context.Context, nodeToRefres
 
 	refreshComplete := make(chan struct{})
 	go n.refreshNeighbor(ctx, &nodeToRefresh, refreshComplete)
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-refreshComplete:
-			return
-		}
+	select {
+	case <-ctx.Done():
+	case <-refreshComplete:
 	}
 }
 

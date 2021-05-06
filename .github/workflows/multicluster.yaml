@@ -14,8 +14,8 @@ on:
   ###
 
 env:
-  clusterName1: ${{ github.repository_owner }}-${{ github.event.repository.name }}-${{ github.run_id }}-multicluster-1
-  clusterName2: ${{ github.repository_owner }}-${{ github.event.repository.name }}-${{ github.run_id }}-multicluster-2
+  clusterName1: ${{ github.repository_owner }}-${{ github.event.repository.name }}-${{ github.run_id }}-mesh-1
+  clusterName2: ${{ github.repository_owner }}-${{ github.event.repository.name }}-${{ github.run_id }}-mesh-2
   zone: us-west2-a
   check_url: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
@@ -26,7 +26,7 @@ jobs:
         startsWith(github.event.comment.body, 'ci-multicluster') ||
         startsWith(github.event.comment.body, 'test-me-please')
       )) ||
-      github.event_name == 'schedule' ||
+      (github.event_name == 'schedule' && github.repository == 'cilium/cilium') ||
       github.event.label.name == 'ci-run/multicluster'
     runs-on: ubuntu-latest
     timeout-minutes: 30
