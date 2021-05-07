@@ -381,11 +381,24 @@ httpd servers) and tests various simple network policies with
 them. These containers should be automatically removed when the test
 finishes.
 
+.. _making_changes:
+
 Making Changes
 ~~~~~~~~~~~~~~
 
-#. Create a topic branch: ``git checkout -b myBranch master``
-#. Make the changes you want
+#. Make sure the ``master`` branch of your fork is up-to-date:
+
+   ::
+
+      git fetch upstream master:master
+
+#. Create a PR branch with a descriptive name, branching from ``master``:
+
+   ::
+
+      git switch -c pr/changes-to-something master
+
+#. Make the changes you want.
 #. Separate the changes into logical commits.
 
    #. Describe the changes in the commit messages. Focus on answering the
@@ -394,6 +407,11 @@ Making Changes
    #. If any description is required to understand your code changes, then
       those instructions should be code comments instead of statements in the
       commit description.
+
+   .. note::
+
+      For submitting PRs, all commits need be to signed off (``git commit -s``). See the section :ref:`dev_coo`.
+
 #. Make sure your changes meet the following criteria:
 
    #. New code is covered by :ref:`unit_testing`.
@@ -402,6 +420,7 @@ Making Changes
       new code.
    #. Follow-up commits are squashed together nicely. Commits should separate
       logical chunks of code and not represent a chronological list of changes.
+
 #. Run ``git diff --check`` to catch obvious white space violations
 #. Run ``make`` to build your changes. This will also run ``make lint`` and error out
    on any golang linting errors. The rules are configured in ``.golangci.yaml``

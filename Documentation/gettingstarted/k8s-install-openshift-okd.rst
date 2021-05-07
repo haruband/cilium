@@ -122,12 +122,13 @@ Next, obtain Cilium manifest from ``cilium/cilium-olm`` repository and copy to `
 
 .. parsed-literal::
 
-   cilium_olm_rev=master
+   cilium_olm_rev="master"
+   cilium_version="\ |release|\ "
 
    curl --silent --location --fail --show-error "https://github.com/cilium/cilium-olm/archive/${cilium_olm_rev}.tar.gz" --output /tmp/cilium-olm.tgz
    tar -C /tmp -xf /tmp/cilium-olm.tgz
 
-   cp /tmp/cilium-olm-${cilium_olm_rev}/manifests/cilium.v\ |release|\ /* "${CLUSTER_NAME}/manifests"
+   cp /tmp/cilium-olm-${cilium_olm_rev}/manifests/cilium.v${cilium_version}/* "${CLUSTER_NAME}/manifests"
 
    rm -rf -- /tmp/cilium-olm.tgz "/tmp/cilium-olm-${cilium_olm_rev}"
 
@@ -151,7 +152,10 @@ Next, obtain Cilium manifest from ``cilium/cilium-olm`` repository and copy to `
 
    .. code-block:: shell-session
 
-       sed -i 's|image:\ registry.connect.redhat.com/isovalent/|image:\ quay.io/cilium/|g' "${CLUSTER_NAME}/manifests/cluster-network-06-cilium-00002-cilium-olm-deployment.yaml"``
+       sed -i 's|image:\ registry.connect.redhat.com/isovalent/|image:\ quay.io/cilium/|g' \
+         "${CLUSTER_NAME}/manifests/cluster-network-06-cilium-00002-cilium-olm-deployment.yaml" \
+         ${CLUSTER_NAME}/manifests/cluster-network-06-cilium-00014-cilium.*-clusterserviceversion.yaml
+
 
 Create the cluster:
 
