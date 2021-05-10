@@ -79,7 +79,7 @@ const (
 func (s *linuxPrivilegedBaseTestSuite) SetUpTest(c *check.C, addressing datapath.NodeAddressing, enableIPv6, enableIPv4 bool) {
 	bpf.ConfigureResourceLimits()
 	s.nodeAddressing = addressing
-	s.mtuConfig = mtu.NewConfiguration(0, false, false, 1500, nil)
+	s.mtuConfig = mtu.NewConfiguration(0, false, false, false, 1500, nil)
 	s.enableIPv6 = enableIPv6
 	s.enableIPv4 = enableIPv4
 
@@ -1012,6 +1012,9 @@ func (s *linuxPrivilegedIPv4OnlyTestSuite) TestArpPingHandling(c *check.C) {
 	defer func() { option.Config.EnableNodePort = prevNP }()
 	option.Config.EnableNodePort = true
 	dpConfig := DatapathConfiguration{HostDevice: "veth0"}
+	prevARPPeriod := option.Config.ARPPingRefreshPeriod
+	defer func() { option.Config.ARPPingRefreshPeriod = prevARPPeriod }()
+	option.Config.ARPPingRefreshPeriod = time.Duration(10 * time.Millisecond)
 
 	linuxNodeHandler := NewNodeHandler(dpConfig, s.nodeAddressing, nil).(*linuxNodeHandler)
 	c.Assert(linuxNodeHandler, check.Not(check.IsNil))
