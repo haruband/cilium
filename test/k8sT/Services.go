@@ -687,6 +687,13 @@ var _ = SkipDescribeIf(helpers.RunsOn54Kernel, "K8sServicesTest", func() {
 		})
 
 		It("LRP connectivity", func() {
+			type lrpTestCase struct {
+				selector string
+				cmd      string
+				want     string
+				notWant  string
+			}
+
 			// Basic sanity check
 			ciliumPods, err := kubectl.GetCiliumPods()
 			Expect(err).To(BeNil(), "Cannot get cilium pods")
@@ -696,12 +703,7 @@ var _ = SkipDescribeIf(helpers.RunsOn54Kernel, "K8sServicesTest", func() {
 			}
 
 			By("Checking traffic goes to local backend")
-			testCases := []struct {
-				selector string
-				cmd      string
-				want     string
-				notWant  string
-			}{
+			testCases := []lrpTestCase{
 				{
 					selector: "id=app1",
 					cmd:      curl4TCP,
@@ -753,23 +755,37 @@ var _ = SkipDescribeIf(helpers.RunsOn54Kernel, "K8sServicesTest", func() {
 					notWant:  be1Name,
 				},
 			}
-			for _, tc := range testCases {
-				Consistently(func() bool {
-					pods, err := kubectl.GetPodNames(helpers.DefaultNamespace, tc.selector)
-					Expect(err).Should(BeNil(), "cannot retrieve pod names by filter %q", tc.selector)
-					Expect(len(pods)).Should(BeNumerically(">", 0), "no pod exists by filter %q", tc.selector)
-					ret := true
-					for _, pod := range pods {
-						res := kubectl.ExecPodCmd(helpers.DefaultNamespace, pod, tc.cmd)
-						Expect(err).To(BeNil(), "%s failed in %s pod", tc.cmd, pod)
-						ret = ret && strings.Contains(res.Stdout(), tc.want) && !strings.Contains(res.Stdout(), tc.notWant)
-					}
-					return ret
-				}, 30*time.Second, 1*time.Second).Should(BeTrue(), "assertion fails for test case: %v", tc)
+
+			var wg sync.WaitGroup
+			wg.Add(len(testCases))
+			for _, testCase := range testCases {
+				go func(tc lrpTestCase) {
+					defer GinkgoRecover()
+					defer wg.Done()
+					Consistently(func() bool {
+						pods, err := kubectl.GetPodNames(helpers.DefaultNamespace, tc.selector)
+						Expect(err).Should(BeNil(), "cannot retrieve pod names by filter %q", tc.selector)
+						Expect(len(pods)).Should(BeNumerically(">", 0), "no pod exists by filter %q", tc.selector)
+						ret := true
+						for _, pod := range pods {
+							res := kubectl.ExecPodCmd(helpers.DefaultNamespace, pod, tc.cmd)
+							Expect(err).To(BeNil(), "%s failed in %s pod", tc.cmd, pod)
+							ret = ret && strings.Contains(res.Stdout(), tc.want) && !strings.Contains(res.Stdout(), tc.notWant)
+						}
+						return ret
+					}, 30*time.Second, 1*time.Second).Should(BeTrue(), "assertion fails for test case: %v", tc)
+				}(testCase)
 			}
+			wg.Wait()
 		})
 
 		It("LRP restores service when removed", func() {
+			type lrpTestCase struct {
+				selector string
+				cmd      string
+				pod      string
+			}
+
 			_ = kubectl.Delete(lrpSvcYAML)
 			// Basic sanity check
 			ciliumPods, err := kubectl.GetCiliumPods()
@@ -780,11 +796,7 @@ var _ = SkipDescribeIf(helpers.RunsOn54Kernel, "K8sServicesTest", func() {
 			}
 
 			By("Checking traffic goes to both backends")
-			testCases := []struct {
-				selector string
-				cmd      string
-				pod      string
-			}{
+			testCases := []lrpTestCase{
 				{
 					selector: "id=app1",
 					cmd:      curl4TCP,
@@ -802,22 +814,30 @@ var _ = SkipDescribeIf(helpers.RunsOn54Kernel, "K8sServicesTest", func() {
 					cmd:      curl4UDP,
 				},
 			}
-			for _, tc := range testCases {
-				for _, want := range []string{be1Name, be2Name} {
-					Eventually(func() bool {
-						pods, err := kubectl.GetPodNames(helpers.DefaultNamespace, tc.selector)
-						Expect(err).Should(BeNil(), "cannot retrieve pod names by filter %q", tc.selector)
-						Expect(len(pods)).Should(BeNumerically(">", 0), "no pod exists by filter %q", tc.selector)
-						ret := true
-						for _, pod := range pods {
-							res := kubectl.ExecPodCmd(helpers.DefaultNamespace, pod, tc.cmd)
-							Expect(err).To(BeNil(), "%s failed in %s pod", tc.cmd, pod)
-							ret = ret && strings.Contains(res.Stdout(), want)
-						}
-						return ret
-					}, 30*time.Second, 1*time.Second).Should(BeTrue(), "assertion fails for test case: %v", tc)
+
+			var wg sync.WaitGroup
+			wg.Add(len(testCases) * 2)
+			for _, testCase := range testCases {
+				for _, name := range []string{be1Name, be2Name} {
+					go func(tc lrpTestCase, want string) {
+						defer GinkgoRecover()
+						defer wg.Done()
+						Eventually(func() bool {
+							pods, err := kubectl.GetPodNames(helpers.DefaultNamespace, tc.selector)
+							Expect(err).Should(BeNil(), "cannot retrieve pod names by filter %q", tc.selector)
+							Expect(len(pods)).Should(BeNumerically(">", 0), "no pod exists by filter %q", tc.selector)
+							ret := true
+							for _, pod := range pods {
+								res := kubectl.ExecPodCmd(helpers.DefaultNamespace, pod, tc.cmd)
+								Expect(err).To(BeNil(), "%s failed in %s pod", tc.cmd, pod)
+								ret = ret && strings.Contains(res.Stdout(), want)
+							}
+							return ret
+						}, 30*time.Second, 1*time.Second).Should(BeTrue(), "assertion fails for test case: %v", tc)
+					}(testCase, name)
 				}
 			}
+			wg.Wait()
 		})
 	})
 
@@ -2815,6 +2835,45 @@ Secondary Interface %s :: IPv4: (%s, %s), IPv6: (%s, %s)`, helpers.DualStackSupp
 					testNodePort(true, false, false, 0) // no need to test from outside, as testDSR did it
 				})
 
+				// GKE COS image does not support sctp module.
+				SkipContextIf(func() bool {
+					return helpers.DoesNotRunWithKubeProxyReplacement() || helpers.RunsOnGKE()
+				}, "BPF NAT engine handles unknown protocol packets", func() {
+					var (
+						iperf3Manifest string
+					)
+					BeforeAll(func() {
+						DeployCiliumAndDNS(kubectl, ciliumFilename)
+						iperf3Manifest = helpers.ManifestGet(kubectl.BasePath(), "iperf3-deployment.yaml")
+						kubectl.ApplyDefault(iperf3Manifest).ExpectSuccess("Iperf3 cannot be deployed")
+					})
+
+					AfterFailed(func() {
+						kubectl.CiliumReport("cilium endpoint list")
+					})
+
+					AfterAll(func() {
+						_ = kubectl.Delete(iperf3Manifest)
+					})
+
+					It("Should not drop SCTP packets", func() {
+						By("Defining the first pod as the client in node 1")
+						clientPodInNode1, clientPodInNode1JSON := fetchPodsWithOffset(kubectl, helpers.DefaultNamespace, "iperf3", "zgroup=testapp", "", true, 0)
+						clientPodInNode1IP, err := clientPodInNode1JSON.Filter("{.status.podIP}")
+						Expect(err).Should(BeNil(), "Failure to retrieve IP of pod %s", clientPodInNode1)
+
+						By("Defining the second pod as the server in node 2")
+						serverPodInNode2, serverPodInNode2JSON := fetchPodsWithOffset(kubectl, helpers.DefaultNamespace, "iperf3", "zgroup=testapp", clientPodInNode1IP.String(), true, 0)
+						serverPodInNode2IP, err := serverPodInNode2JSON.Filter("{.status.podIP}")
+						Expect(err).Should(BeNil(), "Failure to retrieve IP of pod %s", serverPodInNode2)
+
+						By("Running iperf3 in client pod with SCTP protocol and 10MBytes to be sent")
+						res := kubectl.ExecPodCmd(helpers.DefaultNamespace, clientPodInNode1, fmt.Sprintf("iperf3 -c %s --sctp -n 10M -J | jq '.end.sum_received.bytes'", serverPodInNode2IP.String()))
+						receivedBytes, _ := strconv.Atoi(res.GetStdOut().ByLines()[0])
+						Expect(receivedBytes).To(BeNumerically(">", 0))
+					})
+				})
+
 				SkipItIf(helpers.DoesNotExistNodeWithoutCilium, "Tests with XDP, direct routing, SNAT and Random", func() {
 					DeployCiliumOptionsAndDNS(kubectl, ciliumFilename, map[string]string{
 						"loadBalancer.acceleration": "testing-only",
@@ -2915,7 +2974,8 @@ Secondary Interface %s :: IPv4: (%s, %s), IPv6: (%s, %s)`, helpers.DualStackSupp
 		// Run on net-next and 4.19 but not on old versions, because of
 		// LRU requirement.
 		SkipItIf(func() bool {
-			return helpers.DoesNotRunOn419OrLaterKernel()
+			return helpers.DoesNotRunOn419OrLaterKernel() ||
+				(helpers.SkipQuarantined() && helpers.RunsOnGKE())
 		}, "Supports IPv4 fragments", func() {
 			options := map[string]string{}
 			// On GKE we need to disable endpoint routes as fragment tracking

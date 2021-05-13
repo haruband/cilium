@@ -157,8 +157,8 @@ Validate the Setup
 ==================
 
 Run a ``bash`` shell in one of the Cilium pods with
-``kubectl -n kube-system exec -ti <cilium pod> -- bash`` and execute the
-following commands:
+``kubectl -n kube-system exec -ti ds/cilium -- bash`` and execute the following
+commands:
 
 1. Install tcpdump
 
@@ -197,16 +197,18 @@ To replace cilium-ipsec-keys secret with a new key:
     data=$(echo "{\"stringData\":{\"keys\":\"$((($KEYID+1))) "rfc4106\(gcm\(aes\)\)" $(echo $(dd if=/dev/urandom count=20 bs=1 2> /dev/null| xxd -p -c 64)) 128\"}}")
     kubectl patch secret -n kube-system cilium-ipsec-keys -p="${data}" -v=1
 
-Then restart Cilium agents to transition to the new key. During transition the
+Then restart Cilium agents to transition to the new key with
+``kubectl delete pod -n kube-system -l k8s-app=cilium``. During transition the
 new and old keys will be in use. The Cilium agent keeps per endpoint data on
 which key is used by each endpoint and will use the correct key if either side
 has not yet been updated. In this way encryption will work as new keys are
 rolled out.
 
-The KEYID environment variable in the above example stores the current key ID
-used by Cilium. The key variable is a uint8 with value between 0-16 and should
-be monotonically increasing every re-key with a rollover from 16 to 0. The
-Cilium agent will default to KEYID of zero if its not specified in the secret.
+The ``KEYID`` environment variable in the above example stores the current key
+ID used by Cilium. The key variable is a uint8 with value between 0-16 and
+should be monotonically increasing every re-key with a rollover from 16 to 0.
+The Cilium agent will default to ``KEYID`` of zero if its not specified in the
+secret.
 
 Troubleshooting
 ===============
@@ -228,7 +230,7 @@ Troubleshooting
      use ``--set encryption.ipsec.interface=ethX`` to set the encryption
      interface.
 
- * Run a ``bash`` in a Cilium and validate the following:
+ * Run a ``bash`` in a Cilium Pod and validate the following:
 
    * Routing rules matching on fwmark:
 
