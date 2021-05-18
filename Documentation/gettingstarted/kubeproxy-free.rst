@@ -40,17 +40,6 @@ installation of the ``kube-proxy`` add-on:
 
       kubeadm init --skip-phases=addon/kube-proxy
 
-For existing installations with ``kube-proxy`` running as a DaemonSet, remove it
-by using the following commands:
-
-.. code:: bash
-
-      kubectl -n kube-system delete ds kube-proxy
-      # Delete the configmap as well to avoid kube-proxy being reinstalled during a kubeadm upgrade (works only for K8s 1.19 and newer)
-      kubectl -n kube-system delete cm kube-proxy
-      # Run on each node:
-      iptables-restore <(iptables-save | grep -v KUBE)
-
 Afterwards, join worker nodes by specifying the control-plane node IP address and
 the token returned by ``kubeadm init``:
 
@@ -67,6 +56,19 @@ the token returned by ``kubeadm init``:
     You can validate this by running ``kubectl get nodes -o wide`` to see whether
     each node has an ``InternalIP`` which is assigned to a device with the same
     name on each node.
+
+For existing installations with ``kube-proxy`` running as a DaemonSet, remove it
+by using the following commands below. **Careful:** Be aware that this will break
+existing service connections. It will also stop service related traffic until the
+Cilium replacement has been installed:
+
+.. code:: bash
+
+      kubectl -n kube-system delete ds kube-proxy
+      # Delete the configmap as well to avoid kube-proxy being reinstalled during a kubeadm upgrade (works only for K8s 1.19 and newer)
+      kubectl -n kube-system delete cm kube-proxy
+      # Run on each node:
+      iptables-restore <(iptables-save | grep -v KUBE)
 
 .. include:: k8s-install-download-release.rst
 
@@ -1004,7 +1006,16 @@ Cilium's eBPF kube-proxy replacement can be configured in several modes, i.e. it
 replace kube-proxy entirely or it can co-exist with kube-proxy on the system if the
 underlying Linux kernel requirements do not support a full kube-proxy replacement.
 
-This section therefore elaborates on the various ``kubeProxyReplacement`` options:
+**Careful:** When deploying the eBPF kube-proxy replacement under co-existence with
+kube-proxy on the system, be aware that both mechanisms operate independent of each
+other. Meaning, if the eBPF kube-proxy replacement is added or removed on an already
+*running* cluster in order to delegate operation from respectively back to kube-proxy,
+then it must be expected that existing connections will break since, for example,
+both NAT tables are not aware of each other. If deployed in co-existence on a newly
+spawned up node/cluster which does not yet serve user traffic, then this is not an
+issue.
+
+This section elaborates on the various ``kubeProxyReplacement`` options:
 
 - ``kubeProxyReplacement=strict``: This option expects a kube-proxy-free
   Kubernetes setup where Cilium is expected to fully replace all kube-proxy
@@ -1234,6 +1245,9 @@ in great details:
     * "Liberating Kubernetes from kube-proxy and iptables" (KubeCon North America 2019, `slides
       <https://docs.google.com/presentation/d/1cZJ-pcwB9WG88wzhDm2jxQY4Sh8adYg0-N3qWQ8593I/edit>`__,
       `video <https://www.youtube.com/watch?v=bIRwSIwNHC0>`__)
+    * "Kubernetes service load-balancing at scale with BPF & XDP" (Linux Plumbers 2020, `slides
+      <https://linuxplumbersconf.org/event/7/contributions/674/attachments/568/1002/plumbers_2020_cilium_load_balancer.pdf>`__,
+      `video <https://www.youtube.com/watch?v=UkvxPyIJAko&t=21s>`__)
     * "eBPF as a revolutionary technology for the container landscape" (Fosdem 2020, `slides
       <https://docs.google.com/presentation/d/1VOUcoIxgM_c6M_zAV1dLlRCjyYCMdR3tJv6CEdfLMh8/edit>`__,
       `video <https://fosdem.org/2020/schedule/event/containers_bpf/>`__)

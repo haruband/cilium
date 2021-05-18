@@ -12,11 +12,11 @@ require (
 	github.com/Azure/go-autorest/autorest/validation v0.2.0 // indirect
 	github.com/aliyun/alibaba-cloud-sdk-go v1.61.957
 	github.com/asaskevich/govalidator v0.0.0-20200907205600-7a23bdc65eef
-	github.com/aws/aws-sdk-go-v2 v1.3.3
-	github.com/aws/aws-sdk-go-v2/config v1.1.6
-	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.0.6
+	github.com/aws/aws-sdk-go-v2 v1.5.0
+	github.com/aws/aws-sdk-go-v2/config v1.2.0
+	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.1.0
 	github.com/aws/aws-sdk-go-v2/service/ec2 v1.5.0
-	github.com/aws/smithy-go v1.3.1
+	github.com/aws/smithy-go v1.4.0
 	github.com/blang/semver/v4 v4.0.0
 	github.com/cilium/customvet v0.0.0-20201209211516-9852765c1ac4
 	github.com/cilium/deepequal-gen v0.0.0-20200406125435-ad6a9003139e
@@ -33,7 +33,7 @@ require (
 	github.com/docker/libnetwork v0.0.0-20190128195551-d8d4c8cf03d7
 	github.com/fsnotify/fsnotify v1.4.10-0.20200417215612-7f4cf4dd2b52
 	github.com/go-openapi/errors v0.19.9
-	github.com/go-openapi/loads v0.20.0
+	github.com/go-openapi/loads v0.20.2
 	github.com/go-openapi/runtime v0.19.26
 	github.com/go-openapi/spec v0.20.3
 	github.com/go-openapi/strfmt v0.20.0
