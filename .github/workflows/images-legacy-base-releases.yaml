@@ -1,5 +1,6 @@
 name: Base Image Release Build
 
+# Any change in triggers needs to be reflected in the concurrency group.
 on:
   pull_request_target:
     types:
@@ -9,6 +10,10 @@ on:
     paths:
       - images/runtime/**
       - images/builder/**
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
   build-and-push:
@@ -94,6 +99,15 @@ jobs:
           name: image-digest ${{ matrix.name }}
           path: image-digest
           retention-days: 1
+
+      - name: Send slack notification
+        if: ${{ (cancelled() || failure()) && (github.event_name == 'schedule' || github.event_name == 'push') }}
+        uses: 8398a7/action-slack@dcc8c8e9dd8802e21a712dc0c003db97b42efe43
+        with:
+          status: ${{ job.status }}
+          fields: repo,message,commit,author,action,eventName,ref,workflow,job,took # selectable (default: repo,message)
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
 
   image-digests:
     if: ${{ github.repository == 'cilium/cilium' }}

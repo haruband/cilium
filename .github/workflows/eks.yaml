@@ -1,5 +1,6 @@
 name: ConformanceEKS (ci-eks)
 
+# Any change in triggers needs to be reflected in the concurrency group.
 on:
   issue_comment:
     types:
@@ -12,6 +13,10 @@ on:
   #  types:
   #    - "labeled"
   ###
+
+concurrency:
+  group: "${{ github.workflow }} ${{ github.event.issue.pull_request.url || 'scheduled' }}"
+  cancel-in-progress: true
 
 env:
   clusterName: ${{ github.repository_owner }}-${{ github.event.repository.name }}-${{ github.run_id }}
@@ -78,7 +83,7 @@ jobs:
           rm eksctl_$(uname -s)_amd64.tar.gz
 
       - name: Set up AWS CLI credentials
-        uses: aws-actions/configure-aws-credentials@cefc5912bc61e2b5a3b049c839fc283c7712d4e0
+        uses: aws-actions/configure-aws-credentials@0309c38ebd10f90dfbb3889431bcf4ea38088012
         with:
           aws-access-key-id: ${{ secrets.AWS_PR_SA_ID }}
           aws-secret-access-key: ${{ secrets.AWS_PR_SA_KEY }}
@@ -218,3 +223,12 @@ jobs:
           description: Connectivity test cancelled
           state: pending
           target_url: ${{ env.check_url }}
+
+      - name: Send slack notification
+        if: ${{ (cancelled() || failure()) && (github.event_name == 'schedule' || github.event_name == 'push') }}
+        uses: 8398a7/action-slack@dcc8c8e9dd8802e21a712dc0c003db97b42efe43
+        with:
+          status: ${{ job.status }}
+          fields: repo,message,commit,author,action,eventName,ref,workflow,job,took # selectable (default: repo,message)
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

@@ -1,8 +1,9 @@
 # Copyright 2017-2020 Authors of Cilium
 # SPDX-License-Identifier: Apache-2.0
 
-# This Makefile is expected to run inside cilium/hubble-proto image to generate
-# the proto files.
+# This Makefile is expected to run inside the cilium-builder image to generate
+# the proto files. Run `make proto` on ./Makefile to invoke run this inside a
+# a container.
 
 PROTOC ?= protoc
 
@@ -17,9 +18,9 @@ HUBBLE_GO_TARGETS := $(HUBBLE_PROTO_SOURCES:.proto=.pb.go) $(HUBBLE_PROTO_SOURCE
 
 HUBBLE_PROTO_PATH := .
 
-HUBBLE_PROTOC_PLUGINS := --plugin=/proto/protoc-gen-go
-HUBBLE_PROTOC_PLUGINS += --plugin=/proto/protoc-gen-go-grpc
-HUBBLE_PROTOC_PLUGINS += --plugin=/proto/protoc-gen-go-json
+HUBBLE_PROTOC_PLUGINS := --plugin=$(GOPATH)/bin/protoc-gen-go
+HUBBLE_PROTOC_PLUGINS += --plugin=$(GOPATH)/bin/protoc-gen-go-grpc
+HUBBLE_PROTOC_PLUGINS += --plugin=$(GOPATH)/bin/protoc-gen-go-json
 
 .PHONY: all
 all:
