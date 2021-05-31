@@ -851,8 +851,10 @@ func parseEndpoint(ctx context.Context, owner regeneration.Owner, bEp []byte) (*
 	// If host label is present, it's the host endpoint.
 	ep.isHost = ep.HasLabels(labels.LabelHost)
 
-	// Overwrite datapath configuration with the current agent configuration.
-	ep.DatapathConfiguration = NewDatapathConfiguration()
+	if ep.isHost {
+		// Overwrite datapath configuration with the current agent configuration.
+		ep.DatapathConfiguration = NewDatapathConfiguration()
+	}
 
 	// We need to check for nil in Status, CurrentStatuses and Log, since in
 	// some use cases, status will be not nil and Cilium will eventually
@@ -1328,12 +1330,14 @@ func (e *Endpoint) setState(toState State, reason string) bool {
 		// transitioning to StateWaitingToRegenerate, as this means that a
 		// regeneration is already queued up. Callers would then queue up
 		// another unneeded regeneration, which is undesired.
-		case StateWaitingForIdentity, StateDisconnecting, StateRestoring:
+		// Transition to StateWaitingForIdentity is also not allowed as that
+		// will break the ensuing regeneration.
+		case StateDisconnecting, StateRestoring:
 			goto OKState
-		// Don't log this state transition being invalid below so that we don't
+		// Don't log these state transition being invalid below so that we don't
 		// put warnings in the logs for a case which does not result in incorrect
 		// behavior.
-		case StateWaitingToRegenerate:
+		case StateWaitingForIdentity, StateWaitingToRegenerate:
 			return false
 		}
 	case StateRegenerating:
