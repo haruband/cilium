@@ -23,7 +23,6 @@ jobs:
         uses: dorny/paths-filter@78ab00f87740f82aec8ed8826eb4c3c851044126
         id: changes
         with:
-          base: ${{ github.event.pull_request.base.sha || github.event.before }}
           filters: |
             bpf-tree:
               - 'bpf/**'
@@ -85,7 +84,7 @@ jobs:
           go-version: 1.16.4
       - name: Cache LLVM and Clang
         id: cache-llvm
-        uses: actions/cache@1a9e2138d905efd099035b49d8b7a3888c653ca8
+        uses: actions/cache@c64c572235d810460d0d6876e9c705ad5002b353
         with:
           path: $HOME/.clang
           key: llvm-10.0

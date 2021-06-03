@@ -98,7 +98,12 @@ to create a Kubernetes cluster locally or using a managed Kubernetes service:
        .. code-block:: shell-session
 
           minikube start --network-plugin=cni
-          minikube ssh -- sudo mount bpffs -t bpf /sys/fs/bpf
+
+    .. note::
+
+       From minikube v1.12.1+, cilium networking plugin can be enabled directly with
+       ``--cni=cilium`` parameter in ``minikube start`` command. However, this may not
+       install the latest version of cilium.
 
 Install the Cilium CLI
 ======================

@@ -1,4 +1,4 @@
-// Copyright 2017-2021 Authors of Cilium
+// Copyright 2021 Authors of Cilium
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,16 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//+build armbe arm64be mips mips64 ppc64
+
 package byteorder
 
-import (
-	"net"
-)
+var Native binary.ByteOrder = binary.BigEndian
 
-// NetIPv4ToHost32 converts an net.IP to a uint32 in host byte order. ip
-// must be a IPv4 address, otherwise the function will panic.
-func NetIPv4ToHost32(ip net.IP) uint32 {
-	ipv4 := ip.To4()
-	_ = ipv4[3] // Assert length of ipv4.
-	return Native.Uint32(ipv4)
-}
+func HostToNetwork16(u uint16) uint16 { return u }
+func HostToNetwork32(u uint32) uint32 { return u }
+func NetworkToHost16(u uint16) uint16 { return u }
+func NetworkToHost32(u uint32) uint32 { return u }
