@@ -59,7 +59,7 @@ jobs:
           persist-credentials: false
       - name: Check code changes
         if: ${{ github.event.issue.pull_request }}
-        uses: dorny/paths-filter@78ab00f87740f82aec8ed8826eb4c3c851044126
+        uses: dorny/paths-filter@b2feaf19c27470162a626bd6fa8438ae5b263721
         id: tested-tree
         with:
           base: ${{ steps.pr.outputs.base }}
@@ -295,7 +295,7 @@ jobs:
 
       - name: Upload artifacts
         if: ${{ failure() }}
-        uses: actions/upload-artifact@ee69f02b3dfdecd58bb31b4d133da38ba6fe3700
+        uses: actions/upload-artifact@27121b0bdffd731efa15d66772be8dc71245d074
         with:
           name: cilium-sysdump-out.zip
           path: cilium-sysdump-out.zip
