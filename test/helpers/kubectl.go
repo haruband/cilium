@@ -1209,41 +1209,6 @@ func (kub *Kubectl) MonitorEndpointStart(pod string, epID int64) (res *CmdRes, c
 	return kub.ExecInBackground(ctx, cmd, ExecOptions{SkipLog: true}), cancel
 }
 
-// BackgroundReport dumps the result of the given commands on cilium pods each
-// five seconds.
-func (kub *Kubectl) BackgroundReport(commands ...string) (context.CancelFunc, error) {
-	backgroundCtx, cancel := context.WithCancel(context.Background())
-	retrieveInfo := func() {
-		pods, err := kub.GetCiliumPods()
-		if err != nil {
-			kub.Logger().Infof("failed to retrieve cilium pods: %s", err)
-			return
-		}
-		if len(pods) == 0 {
-			kub.Logger().Infof("no cilium pods found")
-			return
-		}
-		for _, pod := range pods {
-			for _, cmd := range commands {
-				kub.CiliumExecContext(context.TODO(), pod, cmd)
-			}
-		}
-	}
-	go func(ctx context.Context) {
-		ticker := time.NewTicker(5 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				retrieveInfo()
-			}
-		}
-	}(backgroundCtx)
-	return cancel, nil
-}
-
 // PprofReport runs pprof on cilium nodes each 5 minutes and saves the data
 // into the test folder saved with pprof suffix.
 func (kub *Kubectl) PprofReport() {
@@ -4479,6 +4444,22 @@ func (kub *Kubectl) ensureKubectlVersion() error {
 			path, GetCurrentK8SEnv(), path))
 	if !res.WasSuccessful() {
 		return fmt.Errorf("failed to download kubectl")
+	}
+	return nil
+}
+
+// NslookupInPod executes 'nslookup' in the given pod until it succeeds or times out.
+func (kub *Kubectl) NslookupInPod(namespace, pod string, target string) (err error) {
+	err2 := WithTimeout(func() bool {
+		res := kub.ExecPodCmd(namespace, pod, fmt.Sprintf("nslookup %s", target))
+		if res.WasSuccessful() {
+			return true
+		}
+		err = fmt.Errorf("error looking up %s from %s/%s: %s", target, namespace, pod, res.CombineOutput().String())
+		return false
+	}, "Could not resolve target name", &TimeoutConfig{Timeout: HelperTimeout})
+	if err2 != nil {
+		return err
 	}
 	return nil
 }
