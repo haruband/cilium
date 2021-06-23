@@ -122,7 +122,7 @@ jobs:
 
       - name: Install Cilium CLI
         run: |
-          curl -LO https://github.com/cilium/cilium-cli/releases/download/v0.6/cilium-linux-amd64.tar.gz
+          curl -LO https://github.com/cilium/cilium-cli/releases/download/v0.8.1/cilium-linux-amd64.tar.gz
           sudo tar xzvfC cilium-linux-amd64.tar.gz /usr/bin
           rm cilium-linux-amd64.tar.gz
 
@@ -237,7 +237,7 @@ jobs:
             --multi-cluster ${{ steps.contexts.outputs.context2 }} \
             --test '!pod-to-nodeport' \
             --test '!pod-to-local-nodeport' \
-             --flow-validation=disabled
+             --flow-validation=warning
 
       - name: Post-test information gathering
         if: ${{ failure() }}

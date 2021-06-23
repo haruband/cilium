@@ -243,8 +243,8 @@ const (
 	// ...and their exceptions.
 	lrpExists            = "local-redirect service exists for frontend"                  // cf. https://github.com/cilium/cilium/issues/16400
 	opCannotBeFulfilled  = "Operation cannot be fulfilled on leases.coordination.k8s.io" // cf. https://github.com/cilium/cilium/issues/16402
+	initLeaderElection   = "error initially creating leader election record: leases."    // cf. https://github.com/cilium/cilium/issues/16402#issuecomment-861544964
 	lockDeletedEp        = "lock failed: endpoint is in the process of being removed"    // cf. https://github.com/cilium/cilium/issues/16422
-	listenAndServeFailed = "ListenAndServe failed for service health server"             // cf. https://github.com/cilium/cilium/pull/16477
 	globalDataSupport    = "kernel doesn't support global data"                          // cf. https://github.com/cilium/cilium/issues/16418
 	removingInexistantID = "removing identity not added to the identity manager!"        // cf. https://github.com/cilium/cilium/issues/16419
 	failedToListCRDs     = "the server could not find the requested resource"            // cf. https://github.com/cilium/cilium/issues/16425
@@ -279,16 +279,11 @@ const (
 // NightlyStableUpgradesFrom maps the cilium image versions to the helm charts
 // that will be used to run update tests in the Nightly test.
 var NightlyStableUpgradesFrom = map[string]string{
-	"v1.6": "1.6-dev",
-	"v1.7": "1.7-dev",
 	"v1.8": "1.8-dev",
 	"v1.9": "1.9-dev",
 }
 
 var (
-	IsCiliumV1_5  = versioncheck.MustCompile(">=1.4.90 <1.6.0")
-	IsCiliumV1_6  = versioncheck.MustCompile(">=1.5.90 <1.7.0")
-	IsCiliumV1_7  = versioncheck.MustCompile(">=1.6.90 <1.8.0")
 	IsCiliumV1_8  = versioncheck.MustCompile(">=1.7.90 <1.9.0")
 	IsCiliumV1_9  = versioncheck.MustCompile(">=1.8.90 <1.10.0")
 	IsCiliumV1_10 = versioncheck.MustCompile(">=1.9.90 <1.11.0")
@@ -313,7 +308,9 @@ var badLogMessages = map[string][]string{
 	unstableStat:        nil,
 	removeTransientRule: nil,
 	"DATA RACE":         nil,
-	"level=error":       {lrpExists, opCannotBeFulfilled, lockDeletedEp, listenAndServeFailed, globalDataSupport, removingInexistantID, failedToListCRDs},
+	// Exceptions for level=error should only be added as a last resort, if the
+	// error cannot be fixed in Cilium or in the test.
+	"level=error": {lrpExists, opCannotBeFulfilled, initLeaderElection, lockDeletedEp, globalDataSupport, removingInexistantID, failedToListCRDs},
 }
 
 var ciliumCLICommands = map[string]string{

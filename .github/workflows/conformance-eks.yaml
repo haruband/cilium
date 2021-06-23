@@ -122,7 +122,7 @@ jobs:
 
       - name: Install Cilium CLI
         run: |
-          curl -LO https://github.com/cilium/cilium-cli/releases/download/v0.6/cilium-linux-amd64.tar.gz
+          curl -LO https://github.com/cilium/cilium-cli/releases/download/v0.8.1/cilium-linux-amd64.tar.gz
           sudo tar xzvfC cilium-linux-amd64.tar.gz /usr/bin
           rm cilium-linux-amd64.tar.gz
 
@@ -184,7 +184,7 @@ jobs:
 
       - name: Run connectivity test
         run: |
-          cilium connectivity test
+          cilium connectivity test --flow-validation=warning
 
       - name: Clean up Cilium
         run: |

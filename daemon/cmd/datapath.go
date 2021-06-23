@@ -21,7 +21,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cilium/cilium/pkg/bpf"
 	"github.com/cilium/cilium/pkg/common"
 	"github.com/cilium/cilium/pkg/controller"
 	"github.com/cilium/cilium/pkg/datapath"
@@ -286,18 +285,6 @@ func (d *Daemon) initMaps() error {
 		return nil
 	}
 
-	// Rename old policy call map to avoid packet drops during upgrade.
-	// TODO: Remove this renaming step once Cilium 1.8 is the oldest supported
-	// release.
-	policyMapPath := bpf.MapPath("cilium_policy")
-	if _, err := os.Stat(policyMapPath); err == nil {
-		newPolicyMapPath := bpf.MapPath(policymap.PolicyCallMapName)
-		if err = os.Rename(policyMapPath, newPolicyMapPath); err != nil {
-			log.WithError(err).Fatalf("Failed to rename policy call map from %s to %s",
-				policyMapPath, newPolicyMapPath)
-		}
-	}
-
 	if _, err := lxcmap.LXCMap.OpenOrCreate(); err != nil {
 		return err
 	}
@@ -457,7 +444,7 @@ func (d *Daemon) initMaps() error {
 	}
 
 	if option.Config.NodePortAlg == option.NodePortAlgMaglev {
-		if err := lbmap.InitMaglevMaps(option.Config.EnableIPv4, option.Config.EnableIPv6); err != nil {
+		if err := lbmap.InitMaglevMaps(option.Config.EnableIPv4, option.Config.EnableIPv6, uint32(option.Config.MaglevTableSize)); err != nil {
 			return err
 		}
 	}
