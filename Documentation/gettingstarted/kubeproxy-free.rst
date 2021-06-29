@@ -92,6 +92,21 @@ configuration.
         --set k8sServiceHost=REPLACE_WITH_API_SERVER_IP \\
         --set k8sServicePort=REPLACE_WITH_API_SERVER_PORT
 
+.. note::
+
+    Cilium will automatically mount cgroup v2 filesystem required to attach BPF
+    cgroup programs by default at the path ``/run/cilium/cgroupv2``. In order to
+    do that, it needs to mount the host ``/proc`` inside an init container
+    launched by the daemonset temporarily. If you need to disable the auto-mount,
+    specify ``--set cgroup.autoMount.enabled=false``, and set the host mount point
+    where cgroup v2 filesystem is already mounted by using ``--set cgroup.hostRoot``.
+    For example, if not already mounted, you can mount cgroup v2 filesystem by
+    running the below command on the host, and specify ``--set cgroup.hostRoot=/sys/fs/cgroup``.
+
+    .. code:: shell-session
+
+        mount -t cgroup2 none /sys/fs/cgroup
+
 This will install Cilium as a CNI plugin with the eBPF kube-proxy replacement to
 implement handling of Kubernetes services of type ClusterIP, NodePort, LoadBalancer
 and services with externalIPs. On top of that the eBPF kube-proxy replacement also
@@ -1200,6 +1215,43 @@ External Access To ClusterIP Services
 As per `k8s Service <https://kubernetes.io/docs/concepts/services-networking/service/#publishing-services-service-types>`__,
 Cilium's eBPF kube-proxy replacement by default disallows access to a ClusterIP service from outside the cluster.
 This can be allowed by setting ``bpf.lbExternalClusterIP=true``.
+
+
+Troubleshooting
+***************
+
+Validate BPF cgroup programs attachment
+=======================================
+
+Cilium attaches BPF ``cgroup`` programs to enable socket-based load-balancing (aka
+``host-reachable`` services). If you see connectivity issues for ``clusterIP`` services,
+check if the programs are attached to the host ``cgroup root``. The default ``cgroup``
+root is set to ``/run/cilium/cgroupv2``.
+Run the following commands from a Cilium agent pod as well as the underlying
+kubernetes node where the pod is running. If the container runtime in your cluster
+is running in the cgroup namespace mode, Cilium agent pod can attach BPF ``cgroup``
+programs to the ``virtualized cgroup root``. In such cases, Cilium kube-proxy replacement
+based load-balancing may not be effective leading to connectivity issues.
+For more information, ensure that you have the fix `Pull Request <https://github.com/cilium/cilium/pull/16259>`__.
+
+.. code-block:: shell-session
+
+    $ mount | grep cgroup2
+    none on /run/cilium/cgroupv2 type cgroup2 (rw,relatime)
+
+    $ bpftool cgroup tree /run/cilium/cgroupv2/
+    CgroupPath
+    ID       AttachType      AttachFlags     Name
+    /run/cilium/cgroupv2
+    10613    device          multi
+    48497    connect4
+    48493    connect6
+    48499    sendmsg4
+    48495    sendmsg6
+    48500    recvmsg4
+    48496    recvmsg6
+    48498    getpeername4
+    48494    getpeername6
 
 Limitations
 ###########

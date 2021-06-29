@@ -12,18 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package node
+// +build windows
 
-var (
-	providerID string
-)
+package logging
 
-// GetProviderID returns provider ID of this node.
-func GetProviderID() string {
-	return providerID
-}
-
-// SetProviderID sets provider ID of this node.
-func SetProviderID(p string) {
-	providerID = p
+func setupSyslog(logOpts LogOptions, tag string, debug bool) error {
+	return nil
 }
