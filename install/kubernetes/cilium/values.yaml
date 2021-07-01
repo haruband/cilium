@@ -731,6 +731,15 @@ hubble:
     # -- Roll out Hubble-ui pods automatically when configmap is updated.
     rollOutPods: false
 
+    tls:
+      # -- base64 encoded PEM values used to connect to hubble-relay
+      # This keypair is presented to Hubble Relay instances for mTLS
+      # authentication and is required when hubble.relay.tls.server.enabled is true.
+      # These values need to be set manually if hubble.tls.auto.enabled is false.
+      client:
+        cert: ""
+        key: ""
+
     backend:
       # -- Hubble-ui backend image.
       image:
@@ -949,9 +958,14 @@ enableIPv6Masquerade: true
 egressGateway:
   enabled: false
 
-# -- Specify the CIDR for native routing (ie to avoid IP masquerade for).
+# -- Specify the IPv4 CIDR for native routing (ie to avoid IP masquerade for).
 # This value corresponds to the configured cluster-cidr.
+# Deprecated in favor of ipv4NativeRoutingCIDR, will be removed in 1.12.
 # nativeRoutingCIDR:
+
+# -- Specify the IPv4 CIDR for native routing (ie to avoid IP masquerade for).
+# This value corresponds to the configured cluster-cidr.
+# ipv4NativeRoutingCIDR:
 
 monitor:
   # -- Enable the cilium-monitor sidecar.

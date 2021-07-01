@@ -18,7 +18,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  kind_version: v0.9.0
+  kind_version: v0.11.1
   kind_config: .github/kind-config.yaml
   cilium_install_defaults: |
 
@@ -50,7 +50,7 @@ jobs:
 
       - name: Install Cilium CLI
         run: |
-          curl -LO https://github.com/cilium/cilium-cli/releases/download/v0.8.2/cilium-linux-amd64.tar.gz
+          curl -LO https://github.com/cilium/cilium-cli/releases/download/v0.8.3/cilium-linux-amd64.tar.gz
           sudo tar xzvfC cilium-linux-amd64.tar.gz /usr/bin
           rm cilium-linux-amd64.tar.gz
 
@@ -60,7 +60,7 @@ jobs:
           persist-credentials: false
 
       - name: Create kind cluster
-        uses: helm/kind-action@7a937c0fb648064a83b8b9354151e5e543d9fcec
+        uses: helm/kind-action@94729529f85113b88f4f819c17ce61382e6d8478
         with:
           version: ${{ env.kind_version }}
           config: ${{ env.kind_config }}

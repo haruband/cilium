@@ -770,8 +770,11 @@ const (
 	// CiliumNode resource for the local node
 	AutoCreateCiliumNodeResource = "auto-create-cilium-node-resource"
 
-	// IPv4NativeRoutingCIDR describes a CIDR in which pod IPs are routable
-	IPv4NativeRoutingCIDR = "native-routing-cidr"
+	// NativeRoutingCIDR describes a v4 CIDR in which pod IPs are routable
+	NativeRoutingCIDR = "native-routing-cidr"
+
+	// IPv4NativeRoutingCIDR describes a v4 CIDR in which pod IPs are routable
+	IPv4NativeRoutingCIDR = "ipv4-native-routing-cidr"
 
 	// EgressMasqueradeInterfaces is the selector used to select interfaces
 	// subject to egress masquerading
@@ -2511,8 +2514,25 @@ func (c *DaemonConfig) Populate() {
 	c.populateDevices()
 	c.EgressMultiHomeIPRuleCompat = viper.GetBool(EgressMultiHomeIPRuleCompat)
 
-	if nativeCIDR := viper.GetString(IPv4NativeRoutingCIDR); nativeCIDR != "" {
-		c.ipv4NativeRoutingCIDR = cidr.MustParseCIDR(nativeCIDR)
+	nativeRoutingCIDR := viper.GetString(NativeRoutingCIDR)
+	ipv4NativeRoutingCIDR := viper.GetString(IPv4NativeRoutingCIDR)
+
+	if nativeRoutingCIDR != "" && ipv4NativeRoutingCIDR != "" {
+		log.Fatalf("Cannot specify both %s and %s", NativeRoutingCIDR, IPv4NativeRoutingCIDR)
+	}
+
+	if nativeRoutingCIDR != "" {
+		c.ipv4NativeRoutingCIDR = cidr.MustParseCIDR(nativeRoutingCIDR)
+
+		if len(c.ipv4NativeRoutingCIDR.IP) != net.IPv4len {
+			log.Fatalf("%s must be an IPv4 CIDR", NativeRoutingCIDR)
+		}
+	} else if ipv4NativeRoutingCIDR != "" {
+		c.ipv4NativeRoutingCIDR = cidr.MustParseCIDR(ipv4NativeRoutingCIDR)
+
+		if len(c.ipv4NativeRoutingCIDR.IP) != net.IPv4len {
+			log.Fatalf("%s must be an IPv4 CIDR", IPv4NativeRoutingCIDR)
+		}
 	}
 
 	if err := c.calculateBPFMapSizes(); err != nil {
