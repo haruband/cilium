@@ -24,13 +24,33 @@ on:
   ###
 
 concurrency:
-  # In case of PR comment, we can't simply append the comment to the group name
-  # as that is too long and results in an error. Instead we check if it's a
-  # trigger phrase and append a simple 'trigger-phrase'.
+  # Structure:
+  # - Workflow name
+  # - Event type
+  # - A unique identifier depending on event type:
+  #   - schedule: SHA
+  #   - issue_comment: PR number
+  #   - pull_request: PR number
+  #
+  # This structure ensures a unique concurrency group name is generated for each
+  # type of testing:
+  # - schedule: {name} schedule {SHA}
+  # - issue_comment: {name} issue_comment {PR number}
+  # - pull_request: {name} pull_request {PR number}
+  #
+  # Note: for `issue_comment` triggers, we additionally need to filter out based
+  # on comment content, otherwise any comment will interrupt workflow runs.
   group: |
-    "${{ github.workflow }} ${{ github.event.issue.pull_request.url || 'scheduled' }}
-     ${{ (startsWith(github.event.comment.body, 'ci-multicluster') ||
-          startsWith(github.event.comment.body, 'test-me-please')) && 'trigger-phrase' }}"
+    ${{ github.workflow }}
+    ${{ github.event_name }}
+    ${{
+      (github.event_name == 'schedule' && github.sha) ||
+      (github.event_name == 'issue_comment' &&
+        (startsWith(github.event.comment.body, 'ci-multicluster') ||
+        startsWith(github.event.comment.body, 'test-me-please')) &&
+        github.event.issue.number) ||
+      (github.event_name == 'pull_request' && github.event.pull_request.number)
+    }}
   cancel-in-progress: true
 
 env:
@@ -258,12 +278,20 @@ jobs:
         if: ${{ failure() }}
         run: |
           cilium status --context ${{ steps.contexts.outputs.context1 }}
-          cilium clustermesh status --context ${{ steps.contexts.outputs.context1 }}
+          # FIXME: Use of timeout is a workaround for cilium/cilium-cli#384
+          timeout 5s cilium clustermesh status --context ${{ steps.contexts.outputs.context1 }}
           cilium status --context ${{ steps.contexts.outputs.context2 }}
-          cilium clustermesh status --context ${{ steps.contexts.outputs.context2 }}
-          kubectl get pods --all-namespaces -o wide
+          # FIXME: Use of timeout is a workaround for cilium/cilium-cli#384
+          timeout 5s cilium clustermesh status --context ${{ steps.contexts.outputs.context2 }}
+
           curl -sLO https://github.com/cilium/cilium-sysdump/releases/latest/download/cilium-sysdump.zip
-          python cilium-sysdump.zip --output cilium-sysdump-out
+          kubectl config use-context ${{ steps.contexts.outputs.context1 }}
+          kubectl get pods --all-namespaces -o wide
+          python cilium-sysdump.zip --output cilium-sysdump-context1
+
+          kubectl config use-context ${{ steps.contexts.outputs.context2 }}
+          kubectl get pods --all-namespaces -o wide
+          python cilium-sysdump.zip --output cilium-sysdump-context2
         shell: bash {0}
 
       - name: Clean up GKE
@@ -278,7 +306,9 @@ jobs:
         uses: actions/upload-artifact@27121b0bdffd731efa15d66772be8dc71245d074
         with:
           name: cilium-sysdump-out.zip
-          path: cilium-sysdump-out.zip
+          path: |
+            cilium-sysdump-context1.zip
+            cilium-sysdump-context2.zip
           retention-days: 5
 
       - name: Set commit status to success
