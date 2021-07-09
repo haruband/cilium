@@ -221,17 +221,18 @@ jobs:
 
       - name: Port forward Relay
         run: |
-          kubectl port-forward -n kube-system deployment/hubble-relay 4245:4245&
+          cilium hubble port-forward&
           sleep 10s
+          [[ $(pgrep -f "cilium hubble port-forward|kubectl port-forward.*hubble-relay" | wc -l) == 2 ]]
 
       - name: Run connectivity test
         run: |
-          cilium connectivity test --flow-validation=warning
+          cilium connectivity test --flow-validation=disabled
 
       - name: Clean up Cilium
         run: |
           cilium uninstall --wait
-          pgrep -f "kubectl port-forward" | xargs kill -9 # kill background port forwards
+          pkill -f "cilium hubble port-forward|kubectl port-forward.*hubble-relay"
 
       - name: Create custom IPsec secret
         run: |
@@ -252,18 +253,13 @@ jobs:
 
       - name: Port forward Relay
         run: |
-          kubectl port-forward -n kube-system deployment/hubble-relay 4245:4245&
+          cilium hubble port-forward&
           sleep 10s
-
-      - name: Restart connectivity test pods
-        run: |
-          kubectl delete pod -n cilium-test --selector=kind=client
-          kubectl delete pod -n cilium-test --selector=kind=echo
-          # workaround for github.com/cilium/cilium-cli/issues/156
+          [[ $(pgrep -f "cilium hubble port-forward|kubectl port-forward.*hubble-relay" | wc -l) == 2 ]]
 
       - name: Run connectivity test
         run: |
-          cilium connectivity test
+          cilium connectivity test --force-deploy --flow-validation=disabled
 
       - name: Post-test information gathering
         if: ${{ failure() }}
@@ -272,12 +268,13 @@ jobs:
           kubectl get pods --all-namespaces -o wide
           curl -sLO https://github.com/cilium/cilium-sysdump/releases/latest/download/cilium-sysdump.zip
           python cilium-sysdump.zip --output cilium-sysdump-out
-        shell: bash {0}
+        shell: bash {0} # Disable default fail-fast behaviour so that all commands run independently
 
       - name: Clean up EKS
         if: ${{ always() }}
         run: |
           eksctl delete cluster --name ${{ env.clusterName }}
+        shell: bash {0} # Disable default fail-fast behaviour so that all commands run independently
 
       - name: Upload artifacts
         if: ${{ failure() }}

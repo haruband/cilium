@@ -57,6 +57,7 @@ env:
   clusterName1: ${{ github.repository_owner }}-${{ github.event.repository.name }}-${{ github.run_id }}-mesh-1
   clusterName2: ${{ github.repository_owner }}-${{ github.event.repository.name }}-${{ github.run_id }}-mesh-2
   zone: us-west2-a
+  firewallRuleName: ${{ github.repository_owner }}-${{ github.event.repository.name }}-${{ github.run_id }}-rule
   check_url: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
 jobs:
@@ -180,7 +181,8 @@ jobs:
             --disk-type pd-standard \
             --disk-size 10GB \
             --node-taints node.cilium.io/agent-not-ready=true:NoSchedule \
-            --preemptible
+            --preemptible \
+            --enable-ip-alias
 
       - name: Create GKE cluster 2
         run: |
@@ -193,7 +195,17 @@ jobs:
             --disk-type pd-standard \
             --disk-size 10GB \
             --node-taints node.cilium.io/agent-not-ready=true:NoSchedule \
-            --preemptible
+            --preemptible \
+            --enable-ip-alias
+
+      - name: Allow cross-cluster traffic
+        run: |
+          TAG1=$(gcloud compute firewall-rules list --filter="name~^gke-${{ env.clusterName1 }}-[0-9a-z]*-all$" --format="value(name)")
+          TAG2=$(gcloud compute firewall-rules list --filter="name~^gke-${{ env.clusterName2 }}-[0-9a-z]*-all$" --format="value(name)")
+          gcloud compute firewall-rules describe $TAG1
+          gcloud compute firewall-rules describe $TAG2
+          gcloud compute firewall-rules create ${{ env.firewallRuleName }} --allow tcp,udp,icmp,sctp,esp,ah --priority=999 --source-ranges=10.0.0.0/9 --target-tags=${TAG1/-all/-node},${TAG2/-all/-node}
+          gcloud compute firewall-rules describe ${{ env.firewallRuleName }}
 
       - name: Get cluster credentials and setup contexts
         id: contexts
@@ -218,19 +230,22 @@ jobs:
           cilium install ${{ steps.vars.outputs.cilium_install_defaults }} \
             --context ${{ steps.contexts.outputs.context1 }} \
             --cluster-name=${{ env.clusterName1 }} \
-            --cluster-id 1
+            --cluster-id 1 \
+            --native-routing-cidr=10.0.0.0/9
 
       - name: Install Cilium in cluster2
         run: |
           cilium install ${{ steps.vars.outputs.cilium_install_defaults }} \
             --context ${{ steps.contexts.outputs.context2 }} \
             --cluster-name=${{ env.clusterName2 }} \
-            --cluster-id 2
+            --cluster-id 2 \
+            --native-routing-cidr=10.0.0.0/9 \
+            --inherit-ca ${{ steps.contexts.outputs.context1 }}
 
       - name: Enable Relay
         run: |
           cilium hubble enable --context ${{ steps.contexts.outputs.context1 }} ${{ steps.vars.outputs.hubble_enable_defaults }}
-          cilium hubble enable --context ${{ steps.contexts.outputs.context2 }} ${{ steps.vars.outputs.hubble_enable_defaults }}
+          cilium hubble enable --context ${{ steps.contexts.outputs.context2 }} ${{ steps.vars.outputs.hubble_enable_defaults }} --relay=false
 
       - name: Wait for Cilium status to be ready
         run: |
@@ -260,19 +275,17 @@ jobs:
 
       - name: Port forward Relay
         run: |
-          kubectl port-forward \
-            --context ${{ steps.contexts.outputs.context1 }} \
-            -n kube-system deployment/hubble-relay 4245:4245&
+          cilium hubble port-forward --context ${{ steps.contexts.outputs.context1 }}&
           sleep 10s
+          [[ $(pgrep -f "cilium hubble port-forward|kubectl port-forward.*hubble-relay" | wc -l) == 2 ]]
 
       - name: Run connectivity test
         run: |
           cilium connectivity test \
             --context ${{ steps.contexts.outputs.context1 }} \
             --multi-cluster ${{ steps.contexts.outputs.context2 }} \
-            --test '!pod-to-nodeport' \
-            --test '!pod-to-local-nodeport' \
-             --flow-validation=warning
+            --test '!/pod-to-.*-nodeport' \
+             --flow-validation=disabled
 
       - name: Post-test information gathering
         if: ${{ failure() }}
@@ -292,14 +305,15 @@ jobs:
           kubectl config use-context ${{ steps.contexts.outputs.context2 }}
           kubectl get pods --all-namespaces -o wide
           python cilium-sysdump.zip --output cilium-sysdump-context2
-        shell: bash {0}
+        shell: bash {0} # Disable default fail-fast behaviour so that all commands run independently
 
       - name: Clean up GKE
         if: ${{ always() }}
         run: |
+          gcloud compute firewall-rules delete ${{ env.firewallRuleName }} --quiet
           gcloud container clusters delete ${{ env.clusterName1 }} --zone ${{ env.zone }} --quiet --async
           gcloud container clusters delete ${{ env.clusterName2 }} --zone ${{ env.zone }} --quiet --async
-        shell: bash {0}
+        shell: bash {0} # Disable default fail-fast behaviour so that all commands run independently
 
       - name: Upload artifacts
         if: ${{ failure() }}
