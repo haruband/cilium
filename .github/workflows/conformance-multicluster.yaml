@@ -155,7 +155,7 @@ jobs:
 
       - name: Install Cilium CLI
         run: |
-          curl -LO https://github.com/cilium/cilium-cli/releases/download/v0.8.3/cilium-linux-amd64.tar.gz
+          curl -LO https://github.com/cilium/cilium-cli/releases/download/v0.8.4/cilium-linux-amd64.tar.gz
           sudo tar xzvfC cilium-linux-amd64.tar.gz /usr/bin
           rm cilium-linux-amd64.tar.gz
 
@@ -277,7 +277,7 @@ jobs:
         run: |
           cilium hubble port-forward --context ${{ steps.contexts.outputs.context1 }}&
           sleep 10s
-          [[ $(pgrep -f "cilium hubble port-forward|kubectl port-forward.*hubble-relay" | wc -l) == 2 ]]
+          [[ $(pgrep -f "cilium.*hubble.*port-forward|kubectl.*port-forward.*hubble-relay" | wc -l) == 2 ]]
 
       - name: Run connectivity test
         run: |
@@ -291,11 +291,9 @@ jobs:
         if: ${{ failure() }}
         run: |
           cilium status --context ${{ steps.contexts.outputs.context1 }}
-          # FIXME: Use of timeout is a workaround for cilium/cilium-cli#384
-          timeout 5s cilium clustermesh status --context ${{ steps.contexts.outputs.context1 }}
+          cilium clustermesh status --context ${{ steps.contexts.outputs.context1 }}
           cilium status --context ${{ steps.contexts.outputs.context2 }}
-          # FIXME: Use of timeout is a workaround for cilium/cilium-cli#384
-          timeout 5s cilium clustermesh status --context ${{ steps.contexts.outputs.context2 }}
+          cilium clustermesh status --context ${{ steps.contexts.outputs.context2 }}
 
           curl -sLO https://github.com/cilium/cilium-sysdump/releases/latest/download/cilium-sysdump.zip
           kubectl config use-context ${{ steps.contexts.outputs.context1 }}
