@@ -950,6 +950,9 @@ const (
 	// ExternalClusterIPName is the name of the option to enable
 	// cluster external access to ClusterIP services.
 	ExternalClusterIPName = "bpf-lb-external-clusterip"
+
+	// VLANBPFBypass instructs Cilium to bypass bpf logic for vlan tagged packets
+	VLANBPFBypass = "vlan-bpf-bypass"
 )
 
 // Default string arguments
@@ -1949,6 +1952,9 @@ type DaemonConfig struct {
 
 	// ARPPingRefreshPeriod is the ARP entries refresher period.
 	ARPPingRefreshPeriod time.Duration
+
+	// VLANBPFBypass list of explicitly allowed VLAN id's for bpf logic bypass
+	VLANBPFBypass []int
 }
 
 var (
@@ -2187,7 +2193,7 @@ func (c *DaemonConfig) Validate() error {
 		if !c.EnableIPv6 {
 			return fmt.Errorf("IPv6NDP cannot be enabled when IPv6 is not enabled")
 		}
-		if len(c.IPv6MCastDevice) == 0 {
+		if len(c.IPv6MCastDevice) == 0 && !MightAutoDetectDevices() {
 			return fmt.Errorf("IPv6NDP cannot be enabled without %s", IPv6MCastDevice)
 		}
 	}
@@ -2513,6 +2519,8 @@ func (c *DaemonConfig) Populate() {
 	c.populateLoadBalancerSettings()
 	c.populateDevices()
 	c.EgressMultiHomeIPRuleCompat = viper.GetBool(EgressMultiHomeIPRuleCompat)
+
+	c.VLANBPFBypass = viper.GetIntSlice(VLANBPFBypass)
 
 	nativeRoutingCIDR := viper.GetString(NativeRoutingCIDR)
 	ipv4NativeRoutingCIDR := viper.GetString(IPv4NativeRoutingCIDR)

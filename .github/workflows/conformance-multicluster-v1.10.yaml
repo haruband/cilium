@@ -1,4 +1,4 @@
-name: ConformanceEKS (ci-eks)
+name: Multicluster / Cluster mesh (ci-multicluster-1.10)
 
 # Any change in triggers needs to be reflected in the concurrency group.
 on:
@@ -7,7 +7,7 @@ on:
       - created
   # Run every 6 hours
   schedule:
-    - cron:  '0 1/6 * * *'
+    - cron:  '0 3/6 * * *'
   ### FOR TESTING PURPOSES
   # This workflow runs in the context of `master`, and ignores changes to
   # workflow files in PRs. For testing changes to this workflow from a PR:
@@ -52,16 +52,18 @@ concurrency:
     ${{
       (github.event_name == 'schedule' && github.sha) ||
       (github.event_name == 'issue_comment' &&
-        (startsWith(github.event.comment.body, 'ci-eks') ||
-        startsWith(github.event.comment.body, 'test-me-please')) &&
+        (startsWith(github.event.comment.body, 'ci-multicluster-1.10') ||
+        startsWith(github.event.comment.body, 'test-backport-1.10')) &&
         github.event.issue.number) ||
       (github.event_name == 'pull_request' && github.event.pull_request.number)
     }}
   cancel-in-progress: true
 
 env:
-  clusterName: ${{ github.repository_owner }}-${{ github.event.repository.name }}-${{ github.run_id }}
-  region: us-east-2
+  clusterName1: ${{ github.repository_owner }}-${{ github.event.repository.name }}-${{ github.run_id }}-mesh-1
+  clusterName2: ${{ github.repository_owner }}-${{ github.event.repository.name }}-${{ github.run_id }}-mesh-2
+  zone: us-west2-a
+  firewallRuleName: ${{ github.repository_owner }}-${{ github.event.repository.name }}-${{ github.run_id }}-rule
   check_url: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
 jobs:
@@ -69,8 +71,8 @@ jobs:
     name: Deduce required tests from code changes
     if: |
       (github.event_name == 'issue_comment' && (
-        startsWith(github.event.comment.body, 'ci-eks') ||
-        (startsWith(github.event.comment.body, 'test-me-please'))
+        startsWith(github.event.comment.body, 'ci-multicluster-1.10') ||
+        (startsWith(github.event.comment.body, 'test-backport-1.10'))
       )) ||
       (github.event_name == 'schedule' && github.repository == 'cilium/cilium') ||
       github.event_name == 'pull_request'
@@ -109,13 +111,13 @@ jobs:
     needs: check_changes
     if: |
       (github.event_name == 'issue_comment' && (
-        startsWith(github.event.comment.body, 'ci-eks') ||
-        (startsWith(github.event.comment.body, 'test-me-please') && (needs.check_changes.outputs.tested == 'true'))
+        startsWith(github.event.comment.body, 'ci-multicluster-1.10') ||
+        (startsWith(github.event.comment.body, 'test-backport-1.10') && (needs.check_changes.outputs.tested == 'true'))
       )) ||
       (github.event_name == 'schedule' && github.repository == 'cilium/cilium') ||
       github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
     steps:
       - name: Set up job variables
         id: vars
@@ -132,16 +134,18 @@ jobs:
             OWNER=${{ github.sha }}
           fi
 
-          CILIUM_INSTALL_DEFAULTS="--cluster-name=${{ env.clusterName }} \
-            --agent-image=quay.io/${{ github.repository_owner }}/cilium-ci \
-            --operator-image=quay.io/${{ github.repository_owner }}/operator-aws-ci \
+          CILIUM_INSTALL_DEFAULTS="--agent-image=quay.io/${{ github.repository_owner }}/cilium-ci \
+            --operator-image=quay.io/${{ github.repository_owner }}/operator-generic-ci \
             --version=${SHA} \
             --wait=false \
             --config monitor-aggregation=none"
           HUBBLE_ENABLE_DEFAULTS="--relay-image=quay.io/${{ github.repository_owner }}/hubble-relay-ci \
             --relay-version=${SHA}"
+          CLUSTERMESH_ENABLE_DEFAULTS="--apiserver-image=quay.io/${{ github.repository_owner }}/clustermesh-apiserver-ci \
+            --apiserver-version=${SHA}"
           echo ::set-output name=cilium_install_defaults::${CILIUM_INSTALL_DEFAULTS}
           echo ::set-output name=hubble_enable_defaults::${HUBBLE_ENABLE_DEFAULTS}
+          echo ::set-output name=clustermesh_enable_defaults::${CLUSTERMESH_ENABLE_DEFAULTS}
           echo ::set-output name=sha::${SHA}
           echo ::set-output name=owner::${OWNER}
 
@@ -164,125 +168,158 @@ jobs:
           rm cilium-linux-amd64.tar.gz{,.sha256sum}
           cilium version
 
-      - name: Install eksctl CLI
-        run: |
-          curl -LO "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz"
-          sudo tar xzvfC eksctl_$(uname -s)_amd64.tar.gz /usr/bin
-          rm eksctl_$(uname -s)_amd64.tar.gz
-
-      - name: Set up AWS CLI credentials
-        uses: aws-actions/configure-aws-credentials@0d9a5be0dceea74e09396820e1e522ba4a110d2f
+      - name: Set up gcloud CLI
+        uses: google-github-actions/setup-gcloud@daadedc81d5f9d3c06d2c92f49202a3cc2b919ba
         with:
-          aws-access-key-id: ${{ secrets.AWS_PR_SA_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_PR_SA_KEY }}
-          aws-region: ${{ env.region }}
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          service_account_key: ${{ secrets.GCP_PR_SA_KEY }}
+          export_default_credentials: true
 
-      - name: Create EKS cluster
+      - name: Display gcloud CLI info
         run: |
-          cat <<EOF > eks-config.yaml
-          apiVersion: eksctl.io/v1alpha5
-          kind: ClusterConfig
+          gcloud info
 
-          metadata:
-            name: ${{ env.clusterName }}
-            region: ${{ env.region }}
-            tags:
-             usage: "${{ github.repository_owner }}-${{ github.event.repository.name }}"
-             owner: "${{ steps.vars.outputs.owner }}"
+      - name: Create GKE cluster 1
+        run: |
+          gcloud container clusters create ${{ env.clusterName1 }} \
+            --labels "usage=${{ github.repository_owner }}-${{ github.event.repository.name }},owner=${{ steps.vars.outputs.owner }}" \
+            --zone ${{ env.zone }} \
+            --image-type COS_CONTAINERD \
+            --num-nodes 2 \
+            --machine-type e2-custom-2-4096 \
+            --disk-type pd-standard \
+            --disk-size 10GB \
+            --node-taints node.cilium.io/agent-not-ready=true:NoSchedule \
+            --preemptible \
+            --enable-ip-alias
 
-          managedNodeGroups:
-          - name: ng-1
-            instanceTypes:
-             - t3.medium
-             - t3a.medium
-            desiredCapacity: 2
-            spot: true
-            privateNetworking: true
-            volumeType: "gp3"
-            volumeSize: 10
-            taints:
-             - key: "node.cilium.io/agent-not-ready"
-               value: "true"
-               effect: "NoSchedule"
-          EOF
+      - name: Create GKE cluster 2
+        run: |
+          gcloud container clusters create ${{ env.clusterName2 }} \
+            --labels "usage=${{ github.repository_owner }}-${{ github.event.repository.name }},owner=${{ steps.vars.outputs.owner }}" \
+            --zone ${{ env.zone }} \
+            --image-type COS_CONTAINERD \
+            --num-nodes 2 \
+            --machine-type e2-custom-2-4096 \
+            --disk-type pd-standard \
+            --disk-size 10GB \
+            --node-taints node.cilium.io/agent-not-ready=true:NoSchedule \
+            --preemptible \
+            --enable-ip-alias
 
-          eksctl create cluster -f ./eks-config.yaml
+      - name: Allow cross-cluster traffic
+        run: |
+          TAG1=$(gcloud compute firewall-rules list --filter="name~^gke-${{ env.clusterName1 }}-[0-9a-z]*-all$" --format="value(name)")
+          TAG2=$(gcloud compute firewall-rules list --filter="name~^gke-${{ env.clusterName2 }}-[0-9a-z]*-all$" --format="value(name)")
+          gcloud compute firewall-rules describe $TAG1
+          gcloud compute firewall-rules describe $TAG2
+          gcloud compute firewall-rules create ${{ env.firewallRuleName }} --allow tcp,udp,icmp,sctp,esp,ah --priority=999 --source-ranges=10.0.0.0/9 --target-tags=${TAG1/-all/-node},${TAG2/-all/-node}
+          gcloud compute firewall-rules describe ${{ env.firewallRuleName }}
+
+      - name: Get cluster credentials and setup contexts
+        id: contexts
+        run: |
+          gcloud container clusters get-credentials ${{ env.clusterName1 }} --zone ${{ env.zone }}
+          CONTEXT_1="$(kubectl config view | grep ${{ env.clusterName1 }} | head -1 | awk '{print $2}')"
+          echo ::set-output name=context1::${CONTEXT_1}
+          gcloud container clusters get-credentials ${{ env.clusterName2 }} --zone ${{ env.zone }}
+          CONTEXT_2="$(kubectl config view | grep ${{ env.clusterName2 }} | head -1 | awk '{print $2}')"
+          echo ::set-output name=context2::${CONTEXT_2}
 
       - name: Wait for images to be available
         timeout-minutes: 10
         shell: bash
         run: |
-          for image in cilium-ci operator-aws-ci hubble-relay-ci ; do
+          for image in cilium-ci operator-generic-ci hubble-relay-ci clustermesh-apiserver-ci ; do
             until curl --silent -f -lSL "https://quay.io/api/v1/repository/${{ github.repository_owner }}/$image/tag/${{ steps.vars.outputs.sha }}/images" &> /dev/null; do sleep 45s; done
           done
 
-      - name: Install Cilium
-        run: |
-          cilium install ${{ steps.vars.outputs.cilium_install_defaults }}
-
-      - name: Enable Relay
-        run: |
-          cilium hubble enable ${{ steps.vars.outputs.hubble_enable_defaults }}
-
-      - name: Wait for Cilium status to be ready
-        run: |
-          cilium status --wait
-
-      - name: Port forward Relay
-        run: |
-          cilium hubble port-forward&
-          sleep 10s
-          [[ $(pgrep -f "cilium.*hubble.*port-forward|kubectl.*port-forward.*hubble-relay" | wc -l) == 2 ]]
-
-      - name: Run connectivity test
-        run: |
-          cilium connectivity test --flow-validation=disabled
-
-      - name: Clean up Cilium
-        run: |
-          cilium uninstall --wait
-          pkill -f "cilium.*hubble.*port-forward|kubectl.*port-forward.*hubble-relay"
-
-      - name: Create custom IPsec secret
-        run: |
-          kubectl create -n kube-system secret generic cilium-ipsec-keys --from-literal=keys="15 rfc4106(gcm(aes)) $(echo $(dd if=/dev/urandom count=20 bs=1 2> /dev/null | xxd -p -c 64)) 128"
-
-      - name: Install Cilium with encryption
+      - name: Install Cilium in cluster1
         run: |
           cilium install ${{ steps.vars.outputs.cilium_install_defaults }} \
-            --encryption=ipsec
+            --context ${{ steps.contexts.outputs.context1 }} \
+            --cluster-name=${{ env.clusterName1 }} \
+            --cluster-id 1 \
+            --native-routing-cidr=10.0.0.0/9
+
+      - name: Install Cilium in cluster2
+        run: |
+          cilium install ${{ steps.vars.outputs.cilium_install_defaults }} \
+            --context ${{ steps.contexts.outputs.context2 }} \
+            --cluster-name=${{ env.clusterName2 }} \
+            --cluster-id 2 \
+            --native-routing-cidr=10.0.0.0/9 \
+            --inherit-ca ${{ steps.contexts.outputs.context1 }}
 
       - name: Enable Relay
         run: |
-          cilium hubble enable ${{ steps.vars.outputs.hubble_enable_defaults }}
+          cilium hubble enable --context ${{ steps.contexts.outputs.context1 }} ${{ steps.vars.outputs.hubble_enable_defaults }}
+          cilium hubble enable --context ${{ steps.contexts.outputs.context2 }} ${{ steps.vars.outputs.hubble_enable_defaults }} --relay=false
 
       - name: Wait for Cilium status to be ready
         run: |
-          cilium status --wait
+          cilium status --wait --context ${{ steps.contexts.outputs.context1 }}
+          cilium status --wait --context ${{ steps.contexts.outputs.context2 }}
+
+      - name: Enable cluster mesh
+        run: |
+          cilium clustermesh enable --context ${{ steps.contexts.outputs.context1 }} ${{ steps.vars.outputs.clustermesh_enable_defaults }}
+          cilium clustermesh enable --context ${{ steps.contexts.outputs.context2 }} ${{ steps.vars.outputs.clustermesh_enable_defaults }}
+
+      - name: Wait for cluster mesh status to be ready
+        run: |
+          cilium clustermesh status --wait --context ${{ steps.contexts.outputs.context1 }}
+          cilium clustermesh status --wait --context ${{ steps.contexts.outputs.context2 }}
+
+      - name: Connect clusters
+        run: |
+          cilium clustermesh connect \
+            --context ${{ steps.contexts.outputs.context1 }} \
+            --destination-context ${{ steps.contexts.outputs.context2 }}
+
+      - name: Wait for cluster mesh status to be ready
+        run: |
+          cilium clustermesh status --wait --context ${{ steps.contexts.outputs.context1 }}
+          cilium clustermesh status --wait --context ${{ steps.contexts.outputs.context2 }}
 
       - name: Port forward Relay
         run: |
-          cilium hubble port-forward&
+          cilium hubble port-forward --context ${{ steps.contexts.outputs.context1 }}&
           sleep 10s
           [[ $(pgrep -f "cilium.*hubble.*port-forward|kubectl.*port-forward.*hubble-relay" | wc -l) == 2 ]]
 
       - name: Run connectivity test
         run: |
-          cilium connectivity test --force-deploy --flow-validation=disabled
+          cilium connectivity test \
+            --context ${{ steps.contexts.outputs.context1 }} \
+            --multi-cluster ${{ steps.contexts.outputs.context2 }} \
+            --test '!/pod-to-.*-nodeport' \
+             --flow-validation=disabled
 
       - name: Post-test information gathering
         if: ${{ !success() }}
         run: |
-          cilium status
-          kubectl get pods --all-namespaces -o wide
+          cilium status --context ${{ steps.contexts.outputs.context1 }}
+          cilium clustermesh status --context ${{ steps.contexts.outputs.context1 }}
+          cilium status --context ${{ steps.contexts.outputs.context2 }}
+          cilium clustermesh status --context ${{ steps.contexts.outputs.context2 }}
+
           curl -sLO https://github.com/cilium/cilium-sysdump/releases/latest/download/cilium-sysdump.zip
-          python cilium-sysdump.zip --output cilium-sysdump-out
+          kubectl config use-context ${{ steps.contexts.outputs.context1 }}
+          kubectl get pods --all-namespaces -o wide
+          python cilium-sysdump.zip --output cilium-sysdump-context1
+
+          kubectl config use-context ${{ steps.contexts.outputs.context2 }}
+          kubectl get pods --all-namespaces -o wide
+          python cilium-sysdump.zip --output cilium-sysdump-context2
         shell: bash {0} # Disable default fail-fast behaviour so that all commands run independently
 
-      - name: Clean up EKS
+      - name: Clean up GKE
         if: ${{ always() }}
         run: |
-          eksctl delete cluster --name ${{ env.clusterName }}
+          gcloud compute firewall-rules delete ${{ env.firewallRuleName }} --quiet
+          gcloud container clusters delete ${{ env.clusterName1 }} --zone ${{ env.zone }} --quiet --async
+          gcloud container clusters delete ${{ env.clusterName2 }} --zone ${{ env.zone }} --quiet --async
         shell: bash {0} # Disable default fail-fast behaviour so that all commands run independently
 
       - name: Upload artifacts
@@ -290,7 +327,9 @@ jobs:
         uses: actions/upload-artifact@27121b0bdffd731efa15d66772be8dc71245d074
         with:
           name: cilium-sysdump-out.zip
-          path: cilium-sysdump-out.zip
+          path: |
+            cilium-sysdump-context1.zip
+            cilium-sysdump-context2.zip
           retention-days: 5
 
       - name: Set commit status to success

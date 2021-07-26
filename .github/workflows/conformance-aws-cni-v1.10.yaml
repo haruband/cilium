@@ -1,13 +1,14 @@
-name: ConformanceEKS (ci-eks)
+name: Conformance AWS-CNI (ci-awscni-1.10)
 
 # Any change in triggers needs to be reflected in the concurrency group.
 on:
   issue_comment:
     types:
       - created
+
   # Run every 6 hours
   schedule:
-    - cron:  '0 1/6 * * *'
+    - cron:  '30 0/6 * * *'
   ### FOR TESTING PURPOSES
   # This workflow runs in the context of `master`, and ignores changes to
   # workflow files in PRs. For testing changes to this workflow from a PR:
@@ -52,8 +53,8 @@ concurrency:
     ${{
       (github.event_name == 'schedule' && github.sha) ||
       (github.event_name == 'issue_comment' &&
-        (startsWith(github.event.comment.body, 'ci-eks') ||
-        startsWith(github.event.comment.body, 'test-me-please')) &&
+        (startsWith(github.event.comment.body, 'ci-awscni-1.10') ||
+        startsWith(github.event.comment.body, 'test-backport-1.10')) &&
         github.event.issue.number) ||
       (github.event_name == 'pull_request' && github.event.pull_request.number)
     }}
@@ -69,8 +70,8 @@ jobs:
     name: Deduce required tests from code changes
     if: |
       (github.event_name == 'issue_comment' && (
-        startsWith(github.event.comment.body, 'ci-eks') ||
-        (startsWith(github.event.comment.body, 'test-me-please'))
+        startsWith(github.event.comment.body, 'ci-awscni-1.10') ||
+        (startsWith(github.event.comment.body, 'test-backport-1.10'))
       )) ||
       (github.event_name == 'schedule' && github.repository == 'cilium/cilium') ||
       github.event_name == 'pull_request'
@@ -109,8 +110,8 @@ jobs:
     needs: check_changes
     if: |
       (github.event_name == 'issue_comment' && (
-        startsWith(github.event.comment.body, 'ci-eks') ||
-        (startsWith(github.event.comment.body, 'test-me-please') && (needs.check_changes.outputs.tested == 'true'))
+        startsWith(github.event.comment.body, 'ci-awscni-1.10') ||
+        (startsWith(github.event.comment.body, 'test-backport-1.10') && (needs.check_changes.outputs.tested == 'true'))
       )) ||
       (github.event_name == 'schedule' && github.repository == 'cilium/cilium') ||
       github.event_name == 'pull_request'
@@ -138,10 +139,7 @@ jobs:
             --version=${SHA} \
             --wait=false \
             --config monitor-aggregation=none"
-          HUBBLE_ENABLE_DEFAULTS="--relay-image=quay.io/${{ github.repository_owner }}/hubble-relay-ci \
-            --relay-version=${SHA}"
           echo ::set-output name=cilium_install_defaults::${CILIUM_INSTALL_DEFAULTS}
-          echo ::set-output name=hubble_enable_defaults::${HUBBLE_ENABLE_DEFAULTS}
           echo ::set-output name=sha::${SHA}
           echo ::set-output name=owner::${OWNER}
 
@@ -180,49 +178,74 @@ jobs:
       - name: Create EKS cluster
         run: |
           cat <<EOF > eks-config.yaml
-          apiVersion: eksctl.io/v1alpha5
-          kind: ClusterConfig
+            apiVersion: eksctl.io/v1alpha5
+            kind: ClusterConfig
 
-          metadata:
-            name: ${{ env.clusterName }}
-            region: ${{ env.region }}
-            tags:
-             usage: "${{ github.repository_owner }}-${{ github.event.repository.name }}"
-             owner: "${{ steps.vars.outputs.owner }}"
+            metadata:
+              name: ${{ env.clusterName }}
+              region: ${{ env.region }}
+              tags:
+               usage: "${{ github.repository_owner }}-${{ github.event.repository.name }}"
+               owner: "${{ steps.vars.outputs.owner }}"
 
-          managedNodeGroups:
-          - name: ng-1
-            instanceTypes:
-             - t3.medium
-             - t3a.medium
-            desiredCapacity: 2
-            spot: true
-            privateNetworking: true
-            volumeType: "gp3"
-            volumeSize: 10
-            taints:
-             - key: "node.cilium.io/agent-not-ready"
-               value: "true"
-               effect: "NoSchedule"
+            managedNodeGroups:
+            - name: ng-1
+              instanceTypes:
+               - t3.medium
+               - t3a.medium
+              desiredCapacity: 2
+              spot: true
+              privateNetworking: true
+              volumeType: "gp3"
+              volumeSize: 10
+              taints:
+               - key: "node.cilium.io/agent-not-ready"
+                 value: "true"
+                 effect: "NoSchedule"
           EOF
 
           eksctl create cluster -f ./eks-config.yaml
+
+      - name: Update AWS VPC CNI plugin
+        run: |
+          kubectl apply -f https://raw.githubusercontent.com/aws/amazon-vpc-cni-k8s/v1.7.10/config/v1.7/aws-k8s-cni.yaml
 
       - name: Wait for images to be available
         timeout-minutes: 10
         shell: bash
         run: |
-          for image in cilium-ci operator-aws-ci hubble-relay-ci ; do
+          for image in cilium-ci operator-generic-ci hubble-relay-ci ; do
             until curl --silent -f -lSL "https://quay.io/api/v1/repository/${{ github.repository_owner }}/$image/tag/${{ steps.vars.outputs.sha }}/images" &> /dev/null; do sleep 45s; done
           done
 
       - name: Install Cilium
         run: |
-          cilium install ${{ steps.vars.outputs.cilium_install_defaults }}
+          curl -LO https://github.com/cilium/cilium/archive/master.tar.gz
+          tar xzf master.tar.gz
+          cd cilium-master/install/kubernetes
+          helm install cilium ./cilium \
+            --namespace kube-system \
+            --set image.repository=quay.io/${{ github.repository_owner }}/cilium-ci \
+            --set image.tag=${{ steps.vars.outputs.sha }} \
+            --set operator.image.repository=quay.io/${{ github.repository_owner }}/operator \
+            --set operator.image.suffix="-ci" \
+            --set operator.image.tag=${{ steps.vars.outputs.sha }} \
+            --set cni.chainingMode=aws-cni \
+            --set enableIPv4Masquerade=false \
+            --set tunnel=disabled \
+            --set nodeinit.enabled=true \
+            --set bpf.monitorAggregation=none \
+            --set bandwidthManager=false
 
       - name: Enable Relay
         run: |
-          cilium hubble enable ${{ steps.vars.outputs.hubble_enable_defaults }}
+          cd cilium-master/install/kubernetes
+          helm upgrade cilium ./cilium \
+            --namespace kube-system \
+            --reuse-values \
+            --set hubble.relay.enabled=true \
+            --set hubble.relay.image.repository=quay.io/${{ github.repository_owner }}/hubble-relay-ci \
+            --set hubble.relay.image.tag=${{ steps.vars.outputs.sha }}
 
       - name: Wait for Cilium status to be ready
         run: |
@@ -236,39 +259,9 @@ jobs:
 
       - name: Run connectivity test
         run: |
-          cilium connectivity test --flow-validation=disabled
-
-      - name: Clean up Cilium
-        run: |
-          cilium uninstall --wait
-          pkill -f "cilium.*hubble.*port-forward|kubectl.*port-forward.*hubble-relay"
-
-      - name: Create custom IPsec secret
-        run: |
-          kubectl create -n kube-system secret generic cilium-ipsec-keys --from-literal=keys="15 rfc4106(gcm(aes)) $(echo $(dd if=/dev/urandom count=20 bs=1 2> /dev/null | xxd -p -c 64)) 128"
-
-      - name: Install Cilium with encryption
-        run: |
-          cilium install ${{ steps.vars.outputs.cilium_install_defaults }} \
-            --encryption=ipsec
-
-      - name: Enable Relay
-        run: |
-          cilium hubble enable ${{ steps.vars.outputs.hubble_enable_defaults }}
-
-      - name: Wait for Cilium status to be ready
-        run: |
-          cilium status --wait
-
-      - name: Port forward Relay
-        run: |
-          cilium hubble port-forward&
-          sleep 10s
-          [[ $(pgrep -f "cilium.*hubble.*port-forward|kubectl.*port-forward.*hubble-relay" | wc -l) == 2 ]]
-
-      - name: Run connectivity test
-        run: |
-          cilium connectivity test --force-deploy --flow-validation=disabled
+          cilium connectivity test \
+            --flow-validation=disabled \
+            --test '!fqdn' # L7 policies are not supported in chaining mode.
 
       - name: Post-test information gathering
         if: ${{ !success() }}
@@ -283,7 +276,6 @@ jobs:
         if: ${{ always() }}
         run: |
           eksctl delete cluster --name ${{ env.clusterName }}
-        shell: bash {0} # Disable default fail-fast behaviour so that all commands run independently
 
       - name: Upload artifacts
         if: ${{ !success() }}

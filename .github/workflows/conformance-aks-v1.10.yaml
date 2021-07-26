@@ -1,4 +1,4 @@
-name: ConformanceEKS (ci-eks)
+name: ConformanceAKS (ci-aks-1.10)
 
 # Any change in triggers needs to be reflected in the concurrency group.
 on:
@@ -7,7 +7,7 @@ on:
       - created
   # Run every 6 hours
   schedule:
-    - cron:  '0 1/6 * * *'
+    - cron:  '0 0/6 * * *'
   ### FOR TESTING PURPOSES
   # This workflow runs in the context of `master`, and ignores changes to
   # workflow files in PRs. For testing changes to this workflow from a PR:
@@ -52,16 +52,16 @@ concurrency:
     ${{
       (github.event_name == 'schedule' && github.sha) ||
       (github.event_name == 'issue_comment' &&
-        (startsWith(github.event.comment.body, 'ci-eks') ||
-        startsWith(github.event.comment.body, 'test-me-please')) &&
+        (startsWith(github.event.comment.body, 'ci-aks-1.10') ||
+        startsWith(github.event.comment.body, 'test-backport-1.10')) &&
         github.event.issue.number) ||
       (github.event_name == 'pull_request' && github.event.pull_request.number)
     }}
   cancel-in-progress: true
 
 env:
-  clusterName: ${{ github.repository_owner }}-${{ github.event.repository.name }}-${{ github.run_id }}
-  region: us-east-2
+  name: ${{ github.repository_owner }}-${{ github.event.repository.name }}-${{ github.run_id }}
+  location: westeurope
   check_url: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
 jobs:
@@ -69,8 +69,8 @@ jobs:
     name: Deduce required tests from code changes
     if: |
       (github.event_name == 'issue_comment' && (
-        startsWith(github.event.comment.body, 'ci-eks') ||
-        (startsWith(github.event.comment.body, 'test-me-please'))
+        startsWith(github.event.comment.body, 'ci-aks-1.10') ||
+        (startsWith(github.event.comment.body, 'test-backport-1.10'))
       )) ||
       (github.event_name == 'schedule' && github.repository == 'cilium/cilium') ||
       github.event_name == 'pull_request'
@@ -109,13 +109,13 @@ jobs:
     needs: check_changes
     if: |
       (github.event_name == 'issue_comment' && (
-        startsWith(github.event.comment.body, 'ci-eks') ||
-        (startsWith(github.event.comment.body, 'test-me-please') && (needs.check_changes.outputs.tested == 'true'))
+        startsWith(github.event.comment.body, 'ci-aks-1.10') ||
+        (startsWith(github.event.comment.body, 'test-backport-1.10') && (needs.check_changes.outputs.tested == 'true'))
       )) ||
       (github.event_name == 'schedule' && github.repository == 'cilium/cilium') ||
       github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 35
     steps:
       - name: Set up job variables
         id: vars
@@ -132,10 +132,11 @@ jobs:
             OWNER=${{ github.sha }}
           fi
 
-          CILIUM_INSTALL_DEFAULTS="--cluster-name=${{ env.clusterName }} \
+          CILIUM_INSTALL_DEFAULTS="--cluster-name=${{ env.name }} \
             --agent-image=quay.io/${{ github.repository_owner }}/cilium-ci \
-            --operator-image=quay.io/${{ github.repository_owner }}/operator-aws-ci \
+            --operator-image=quay.io/${{ github.repository_owner }}/operator-azure-ci \
             --version=${SHA} \
+            --azure-resource-group ${{ env.name }} \
             --wait=false \
             --config monitor-aggregation=none"
           HUBBLE_ENABLE_DEFAULTS="--relay-image=quay.io/${{ github.repository_owner }}/hubble-relay-ci \
@@ -164,61 +165,87 @@ jobs:
           rm cilium-linux-amd64.tar.gz{,.sha256sum}
           cilium version
 
-      - name: Install eksctl CLI
-        run: |
-          curl -LO "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz"
-          sudo tar xzvfC eksctl_$(uname -s)_amd64.tar.gz /usr/bin
-          rm eksctl_$(uname -s)_amd64.tar.gz
-
-      - name: Set up AWS CLI credentials
-        uses: aws-actions/configure-aws-credentials@0d9a5be0dceea74e09396820e1e522ba4a110d2f
+      - name: Login to Azure
+        uses: azure/login@77f1b2e3fb80c0e8645114159d17008b8a2e475a
         with:
-          aws-access-key-id: ${{ secrets.AWS_PR_SA_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_PR_SA_KEY }}
-          aws-region: ${{ env.region }}
+          creds: ${{ secrets.AZURE_PR_SP_CREDS }}
 
-      - name: Create EKS cluster
+      - name: Display Azure CLI info
+        uses: azure/CLI@4b58c946a0f48d82cc2b6e31c0d15a6604859554
+        with:
+          azcliversion: 2.0.72
+          inlineScript: |
+            az account show
+
+      - name: Create AKS cluster
+        id: cluster-creation
         run: |
-          cat <<EOF > eks-config.yaml
-          apiVersion: eksctl.io/v1alpha5
-          kind: ClusterConfig
+          # Create group
+          az group create \
+            --name ${{ env.name }} \
+            --location ${{ env.location }} \
+            --tags usage=${{ github.repository_owner }}-${{ github.event.repository.name }} owner=${{ steps.vars.outputs.owner }}
 
-          metadata:
-            name: ${{ env.clusterName }}
-            region: ${{ env.region }}
-            tags:
-             usage: "${{ github.repository_owner }}-${{ github.event.repository.name }}"
-             owner: "${{ steps.vars.outputs.owner }}"
+          # Create cluster with a 1 node-count (we will remove this node pool
+          # afterwards)
+          # Details: Basic load balancers are not supported with multiple node
+          # pools. Create a cluster with standard load balancer selected to use
+          # multiple node pools, learn more at https://aka.ms/aks/nodepools.
+          az aks create \
+            --resource-group ${{ env.name }} \
+            --name ${{ env.name }} \
+            --location ${{ env.location }} \
+            --network-plugin azure \
+            --node-count 1 \
+            --load-balancer-sku standard \
+            --node-vm-size Standard_B2s \
+            --node-osdisk-size 30 \
+            --generate-ssh-keys
 
-          managedNodeGroups:
-          - name: ng-1
-            instanceTypes:
-             - t3.medium
-             - t3a.medium
-            desiredCapacity: 2
-            spot: true
-            privateNetworking: true
-            volumeType: "gp3"
-            volumeSize: 10
-            taints:
-             - key: "node.cilium.io/agent-not-ready"
-               value: "true"
-               effect: "NoSchedule"
-          EOF
+          # Get the name of the node pool that we will delete afterwards
+          echo ::set-output name=nodepool_to_delete::$(az aks nodepool list --cluster-name ${{ env.name }} -g ${{ env.name }} -o json | jq -r '.[0].name')
 
-          eksctl create cluster -f ./eks-config.yaml
+          # Create a node pool with the taint 'node.cilium.io/agent-not-ready=true:NoSchedule'
+          # and with 'mode=system' as it it the same mode used for the nodepool
+          # created with the cluster.
+          az aks nodepool add \
+            --name nodepool2 \
+            --cluster-name ${{ env.name }} \
+            --resource-group ${{ env.name }} \
+            --node-count 2 \
+            --node-vm-size Standard_B2s \
+            --node-osdisk-size 30 \
+            --mode system \
+            --node-taints node.cilium.io/agent-not-ready=true:NoSchedule
+
+      - name: Get cluster credentials
+        run: |
+          az aks get-credentials \
+            --resource-group ${{ env.name }} \
+            --name ${{ env.name }}
 
       - name: Wait for images to be available
         timeout-minutes: 10
         shell: bash
         run: |
-          for image in cilium-ci operator-aws-ci hubble-relay-ci ; do
+          for image in cilium-ci operator-azure-ci hubble-relay-ci ; do
             until curl --silent -f -lSL "https://quay.io/api/v1/repository/${{ github.repository_owner }}/$image/tag/${{ steps.vars.outputs.sha }}/images" &> /dev/null; do sleep 45s; done
           done
 
       - name: Install Cilium
         run: |
           cilium install ${{ steps.vars.outputs.cilium_install_defaults }}
+
+      - name: Delete the first node pool
+        run: |
+          # We can only delete the first node pool after Cilium is installed
+          # because some pods have Pod Disruption Budgets set. If we try to
+          # delete the first node pool without the second node pool being ready,
+          # AKS will not succeed with the pool deletion because some Deployments
+          # can't cease to exist in the cluster.
+          az aks nodepool delete --name ${{ steps.cluster-creation.outputs.nodepool_to_delete }} \
+            --cluster-name ${{ env.name }} \
+            --resource-group ${{ env.name }}
 
       - name: Enable Relay
         run: |
@@ -279,10 +306,10 @@ jobs:
           python cilium-sysdump.zip --output cilium-sysdump-out
         shell: bash {0} # Disable default fail-fast behaviour so that all commands run independently
 
-      - name: Clean up EKS
+      - name: Clean up AKS
         if: ${{ always() }}
         run: |
-          eksctl delete cluster --name ${{ env.clusterName }}
+          az group delete --name ${{ env.name }} --yes --no-wait
         shell: bash {0} # Disable default fail-fast behaviour so that all commands run independently
 
       - name: Upload artifacts
