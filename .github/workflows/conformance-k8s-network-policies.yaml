@@ -27,7 +27,7 @@ jobs:
           echo "Checking for differences between preflight and agent clusterrole"
           diff \
              -I '^[ ]\{2\}name: cilium.*' \
-             -I '^Keep file in synced with.*' \
+             -I '^Keep file in sync with.*' \
              -I '{{- if.*' \
              cilium-agent/clusterrole.yaml \
              cilium-preflight/clusterrole.yaml
@@ -101,7 +101,7 @@ jobs:
           kubectl wait --for condition=Established crd/ciliumnetworkpolicies.cilium.io --timeout=5m
 
       - name: Run cyclonus network policy test
-        working-directory: tests/netpol-cyclonus
+        working-directory: test/k8sT/manifests/netpol-cyclonus
         run: ./test-cyclonus.sh
 
       - name: Capture cilium-sysdump
@@ -119,7 +119,7 @@ jobs:
 
       - name: Send slack notification
         if: ${{ !success() && (github.event_name == 'schedule' || github.event_name == 'push') }}
-        uses: 8398a7/action-slack@dcc8c8e9dd8802e21a712dc0c003db97b42efe43
+        uses: 8398a7/action-slack@e74cd4e48f4452e8158dc4f8bcfc780ae6203364
         with:
           status: ${{ job.status }}
           fields: repo,message,commit,author,action,eventName,ref,workflow,job,took # selectable (default: repo,message)
