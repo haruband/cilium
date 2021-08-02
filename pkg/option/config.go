@@ -1,16 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
 // Copyright 2016-2021 Authors of Cilium
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
 
 package option
 
@@ -84,6 +73,10 @@ const (
 
 	// ARPPingRefreshPeriod is the ARP entries refresher period
 	ARPPingRefreshPeriod = "arping-refresh-period"
+
+	// EnableL2NeighDiscovery determines if cilium should perform L2 neighbor
+	// discovery.
+	EnableL2NeighDiscovery = "enable-l2-neigh-discovery"
 
 	// BPFRoot is the Path to BPF filesystem
 	BPFRoot = "bpf-root"
@@ -656,6 +649,10 @@ const (
 	// KVstoreLeaseTTL is the time-to-live for lease in kvstore.
 	KVstoreLeaseTTL = "kvstore-lease-ttl"
 
+	// KVstoreMaxConsecutiveQuorumErrorsName is the maximum number of acceptable
+	// kvstore consecutive quorum errors before the agent assumes permanent failure
+	KVstoreMaxConsecutiveQuorumErrorsName = "kvstore-max-consecutive-quorum-errors"
+
 	// KVstorePeriodicSync is the time interval in which periodic
 	// synchronization with the kvstore occurs
 	KVstorePeriodicSync = "kvstore-periodic-sync"
@@ -953,6 +950,10 @@ const (
 
 	// VLANBPFBypass instructs Cilium to bypass bpf logic for vlan tagged packets
 	VLANBPFBypass = "vlan-bpf-bypass"
+
+	// NetfilterCompatibleMode guarantees the traffic to pass through kernel
+	// netfilter.
+	NetfilterCompatibleMode = "netfilter-compatible-mode"
 )
 
 // Default string arguments
@@ -1542,6 +1543,10 @@ type DaemonConfig struct {
 	// KVstoreLeaseTTL is the time-to-live for kvstore lease.
 	KVstoreLeaseTTL time.Duration
 
+	// KVstoreMaxConsecutiveQuorumErrors is the maximum number of acceptable
+	// kvstore consecutive quorum errors before the agent assumes permanent failure
+	KVstoreMaxConsecutiveQuorumErrors int
+
 	// KVstorePeriodicSync is the time interval in which periodic
 	// synchronization with the kvstore occurs
 	KVstorePeriodicSync time.Duration
@@ -1644,6 +1649,10 @@ type DaemonConfig struct {
 
 	// EnableHostLegacyRouting enables the old routing path via stack.
 	EnableHostLegacyRouting bool
+
+	// NetfilterCompatibleMode guarantees the traffic to pass through kernel
+	// netfilter.
+	NetfilterCompatibleMode bool
 
 	// NodePortMode indicates in which mode NodePort implementation should run
 	// ("snat", "dsr" or "hybrid")
@@ -1955,6 +1964,9 @@ type DaemonConfig struct {
 
 	// VLANBPFBypass list of explicitly allowed VLAN id's for bpf logic bypass
 	VLANBPFBypass []int
+	// EnableL2NeighDiscovery determines if cilium should perform L2 neighbor
+	// discovery.
+	EnableL2NeighDiscovery bool
 }
 
 var (
@@ -2353,6 +2365,7 @@ func (c *DaemonConfig) Populate() {
 	c.AllowLocalhost = viper.GetString(AllowLocalhost)
 	c.AnnotateK8sNode = viper.GetBool(AnnotateK8sNode)
 	c.ARPPingRefreshPeriod = viper.GetDuration(ARPPingRefreshPeriod)
+	c.EnableL2NeighDiscovery = viper.GetBool(EnableL2NeighDiscovery)
 	c.AutoCreateCiliumNodeResource = viper.GetBool(AutoCreateCiliumNodeResource)
 	c.BPFRoot = viper.GetString(BPFRoot)
 	c.CertDirectory = viper.GetString(CertsDirectory)
@@ -2398,6 +2411,7 @@ func (c *DaemonConfig) Populate() {
 	c.EnableHostLegacyRouting = viper.GetBool(EnableHostLegacyRouting)
 	c.MaglevTableSize = viper.GetInt(MaglevTableSize)
 	c.MaglevHashSeed = viper.GetString(MaglevHashSeed)
+	c.NetfilterCompatibleMode = viper.GetBool(NetfilterCompatibleMode)
 	c.NodePortBindProtection = viper.GetBool(NodePortBindProtection)
 	c.EnableAutoProtectNodePortRange = viper.GetBool(EnableAutoProtectNodePortRange)
 	c.KubeProxyReplacement = viper.GetString(KubeProxyReplacement)
@@ -2446,6 +2460,7 @@ func (c *DaemonConfig) Populate() {
 	c.KVstoreKeepAliveInterval = c.KVstoreLeaseTTL / defaults.KVstoreKeepAliveIntervalFactor
 	c.KVstorePeriodicSync = viper.GetDuration(KVstorePeriodicSync)
 	c.KVstoreConnectivityTimeout = viper.GetDuration(KVstoreConnectivityTimeout)
+	c.KVstoreMaxConsecutiveQuorumErrors = viper.GetInt(KVstoreMaxConsecutiveQuorumErrorsName)
 	c.IPAllocationTimeout = viper.GetDuration(IPAllocationTimeout)
 	c.LabelPrefixFile = viper.GetString(LabelPrefixFile)
 	c.Labels = viper.GetStringSlice(Labels)

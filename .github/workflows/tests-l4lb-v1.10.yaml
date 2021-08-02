@@ -5,9 +5,6 @@ on:
   issue_comment:
     types:
       - created
-  # Run every 6 hours
-  schedule:
-    - cron:  '0 5/6 * * *'
   ### FOR TESTING PURPOSES
   # This workflow runs in the context of `master`, and ignores changes to
   # workflow files in PRs. For testing changes to this workflow from a PR:
@@ -26,6 +23,10 @@ on:
 # By specifying the access of one of the scopes, all of those that are not
 # specified are set to 'none'.
 permissions:
+  # To be able to access the repository with actions/checkout
+  contents: read
+  # To allow retrieving information from the PR API
+  pull-requests: read
   # So that Sibz/github-status-action can write into the status API
   statuses: write
 

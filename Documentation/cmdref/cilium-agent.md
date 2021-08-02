@@ -102,6 +102,7 @@ cilium-agent [flags]
       --enable-k8s-api-discovery                             Enable discovery of Kubernetes API groups and resources with the discovery API
       --enable-k8s-endpoint-slice                            Enables k8s EndpointSlice feature in Cilium if the k8s cluster supports it (default true)
       --enable-k8s-event-handover                            Enable k8s event handover to kvstore for improved scalability
+      --enable-l2-neigh-discovery                            Enables L2 neighbor discovery used by kube-proxy-replacement and IPsec (default true)
       --enable-l7-proxy                                      Enable L7 proxy for L7 policy enforcement (default true)
       --enable-local-node-route                              Enable installation of the route which points the allocation prefix of the local node (default true)
       --enable-local-redirect-policy                         Enable Local Redirect Policy
@@ -187,6 +188,7 @@ cilium-agent [flags]
       --kube-proxy-replacement-healthz-bind-address string   The IP address with port for kube-proxy replacement health check server to serve on (set to '0.0.0.0:10256' for all IPv4 interfaces and '[::]:10256' for all IPv6 interfaces). Set empty to disable.
       --kvstore string                                       Key-value store type
       --kvstore-connectivity-timeout duration                Time after which an incomplete kvstore operation  is considered failed (default 2m0s)
+      --kvstore-max-consecutive-quorum-errors int            Max acceptable kvstore consecutive quorum errors before the agent assumes permanent failure (default 2)
       --kvstore-opt map                                      Key-value store options (default map[])
       --kvstore-periodic-sync duration                       Periodic KVstore synchronization interval (default 5m0s)
       --label-prefix-file string                             Valid label prefixes file path

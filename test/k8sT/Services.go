@@ -1,16 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
 // Copyright 2017-2021 Authors of Cilium
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
 
 package k8sTest
 
@@ -647,6 +636,14 @@ Secondary Interface %s :: IPv4: (%s, %s), IPv6: (%s, %s)`, helpers.DualStackSupp
 			It("", func() {
 				testNodePort(kubectl, ni, false, false, false, 0)
 			})
+
+			// Explicitly test netfilter compat mode with kube-proxy.
+			SkipItIf(helpers.DoesNotRunOn54OrLaterKernel, "with reverse NAT at host netfilterCompatMode=true", func() {
+				DeployCiliumOptionsAndDNS(kubectl, ciliumFilename, map[string]string{
+					"netfilterCompatMode": "true",
+				})
+				testNodePort(kubectl, ni, false, false, false, 0)
+			})
 		})
 
 		SkipContextIf(manualIPv6TestingNotRequired(helpers.DoesNotRunWithKubeProxyReplacement), "Tests IPv6 NodePort Services", func() {
@@ -879,14 +876,14 @@ Secondary Interface %s :: IPv4: (%s, %s), IPv6: (%s, %s)`, helpers.DualStackSupp
 							})
 
 							ccnpHostPolicy = helpers.ManifestGet(kubectl.BasePath(), "ccnp-host-policy-nodeport-tests.yaml")
-							_, err := kubectl.CiliumPolicyAction(helpers.DefaultNamespace, ccnpHostPolicy,
+							_, err := kubectl.CiliumClusterwidePolicyAction(ccnpHostPolicy,
 								helpers.KubectlApply, helpers.HelperTimeout)
 							Expect(err).Should(BeNil(),
 								"Policy %s cannot be applied", ccnpHostPolicy)
 						})
 
 						AfterAll(func() {
-							_, err := kubectl.CiliumPolicyAction(helpers.DefaultNamespace, ccnpHostPolicy,
+							_, err := kubectl.CiliumClusterwidePolicyAction(ccnpHostPolicy,
 								helpers.KubectlDelete, helpers.HelperTimeout)
 							Expect(err).Should(BeNil(),
 								"Policy %s cannot be deleted", ccnpHostPolicy)
@@ -955,6 +952,13 @@ Secondary Interface %s :: IPv4: (%s, %s), IPv6: (%s, %s)`, helpers.DualStackSupp
 
 						testNodePort(kubectl, ni, true, true, helpers.ExistNodeWithoutCilium(), 0)
 					})
+
+					SkipItIf(helpers.DoesNotRunOn54OrLaterKernel, "Test NodePort with netfilterCompatMode=true", func() {
+						DeployCiliumOptionsAndDNS(kubectl, ciliumFilename, map[string]string{
+							"netfilterCompatMode": "true",
+						})
+						testNodePort(kubectl, ni, true, false, helpers.ExistNodeWithoutCilium(), 0)
+					})
 				})
 
 				Context("Tests with direct routing", func() {
@@ -1000,6 +1004,15 @@ Secondary Interface %s :: IPv4: (%s, %s), IPv6: (%s, %s)`, helpers.DualStackSupp
 						testExternalIPs(kubectl, ni)
 					})
 
+					SkipItIf(helpers.DoesNotRunOn54OrLaterKernel, "Test NodePort with netfilterCompatMode=true", func() {
+						DeployCiliumOptionsAndDNS(kubectl, ciliumFilename, map[string]string{
+							"netfilterCompatMode":  "true",
+							"tunnel":               "disabled",
+							"autoDirectNodeRoutes": "true",
+						})
+						testNodePort(kubectl, ni, true, false, helpers.ExistNodeWithoutCilium(), 0)
+					})
+
 					SkipContextIf(helpers.RunsOnGKE, "With host policy", func() {
 						var ccnpHostPolicy string
 
@@ -1011,14 +1024,14 @@ Secondary Interface %s :: IPv4: (%s, %s), IPv6: (%s, %s)`, helpers.DualStackSupp
 							})
 
 							ccnpHostPolicy = helpers.ManifestGet(kubectl.BasePath(), "ccnp-host-policy-nodeport-tests.yaml")
-							_, err := kubectl.CiliumPolicyAction(helpers.DefaultNamespace, ccnpHostPolicy,
+							_, err := kubectl.CiliumClusterwidePolicyAction(ccnpHostPolicy,
 								helpers.KubectlApply, helpers.HelperTimeout)
 							Expect(err).Should(BeNil(),
 								"Policy %s cannot be applied", ccnpHostPolicy)
 						})
 
 						AfterAll(func() {
-							_, err := kubectl.CiliumPolicyAction(helpers.DefaultNamespace, ccnpHostPolicy,
+							_, err := kubectl.CiliumClusterwidePolicyAction(ccnpHostPolicy,
 								helpers.KubectlDelete, helpers.HelperTimeout)
 							Expect(err).Should(BeNil(),
 								"Policy %s cannot be deleted", ccnpHostPolicy)

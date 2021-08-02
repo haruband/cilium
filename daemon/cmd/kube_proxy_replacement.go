@@ -1,16 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
 // Copyright 2019-2020 Authors of Cilium
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
 
 // This module contains the kube-proxy replacement initialization helpers.
 
@@ -540,6 +529,8 @@ func finishKubeProxyReplacementInit(isKubeProxyReplacementStrict bool) error {
 		case (option.Config.EnableIPv4Masquerade || option.Config.EnableIPv6Masquerade) &&
 			!option.Config.EnableBPFMasquerade:
 			msg = fmt.Sprintf("BPF host routing requires %s.", option.EnableBPFMasquerade)
+		case option.Config.NetfilterCompatibleMode:
+			msg = fmt.Sprintf("BPF host routing is not supported with %s.", option.NetfilterCompatibleMode)
 		// All cases below still need to be implemented ...
 		case option.Config.EnableEndpointRoutes:
 			msg = fmt.Sprintf("BPF host routing is currently not supported with %s.", option.EnableEndpointRoutes)

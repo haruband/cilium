@@ -1,16 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
 // Copyright 2016-2021 Authors of Cilium
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
 
 package cmd
 
@@ -233,6 +222,9 @@ func init() {
 
 	flags.Duration(option.ARPPingRefreshPeriod, 5*time.Minute, "Period for remote node ARP entry refresh (set 0 to disable)")
 	option.BindEnv(option.ARPPingRefreshPeriod)
+
+	flags.Bool(option.EnableL2NeighDiscovery, true, "Enables L2 neighbor discovery used by kube-proxy-replacement and IPsec")
+	option.BindEnv(option.EnableL2NeighDiscovery)
 
 	flags.Bool(option.AutoCreateCiliumNodeResource, defaults.AutoCreateCiliumNodeResource, "Automatically create CiliumNode resource for own node on startup")
 	option.BindEnv(option.AutoCreateCiliumNodeResource)
@@ -505,6 +497,9 @@ func init() {
 	flags.Duration(option.KVstoreLeaseTTL, defaults.KVstoreLeaseTTL, "Time-to-live for the KVstore lease.")
 	flags.MarkHidden(option.KVstoreLeaseTTL)
 	option.BindEnv(option.KVstoreLeaseTTL)
+
+	flags.Int(option.KVstoreMaxConsecutiveQuorumErrorsName, defaults.KVstoreMaxConsecutiveQuorumErrors, "Max acceptable kvstore consecutive quorum errors before the agent assumes permanent failure")
+	option.BindEnv(option.KVstoreMaxConsecutiveQuorumErrorsName)
 
 	flags.Duration(option.KVstorePeriodicSync, defaults.KVstorePeriodicSync, "Periodic KVstore synchronization interval")
 	option.BindEnv(option.KVstorePeriodicSync)
@@ -970,6 +965,10 @@ func init() {
 
 	flags.Bool(option.EnableCustomCallsName, false, "Enable tail call hooks for custom eBPF programs")
 	option.BindEnv(option.EnableCustomCallsName)
+
+	flags.Bool(option.NetfilterCompatibleMode, false, "If set to true, guarantees that all traffic will pass through netfilter and that iptable rules will be enforced. This mode may reduce network throughput. If set to false (default), it does not guarantee that all traffic will pass through netfilter.")
+	flags.MarkHidden(option.NetfilterCompatibleMode)
+	option.BindEnv(option.NetfilterCompatibleMode)
 
 	flags.Bool(option.BGPAnnounceLBIP, false, "Announces service IPs of type LoadBalancer via BGP")
 	option.BindEnv(option.BGPAnnounceLBIP)
@@ -1445,6 +1444,15 @@ func initEnv(cmd *cobra.Command) {
 	if option.Config.BGPAnnounceLBIP {
 		option.Config.EnableNodePort = true
 		log.Infof("Auto-set BPF NodePort (%q) because LB IP announcements via BGP depend on it.", option.EnableNodePort)
+	}
+
+	// NetfilterCompatibleMode should be enabled only on higher versions (5.4 or later) of kernel.
+	// If kernel doesn't support higher instruction complexity limit, then disable NetfilterCompatibleMode.
+	if option.Config.NetfilterCompatibleMode {
+		if !probes.NewProbeManager().GetMisc().HaveLargeInsnLimit {
+			option.Config.NetfilterCompatibleMode = false
+			log.Warn("netfilter-compatible-mode is enabled only on 5.4 and higher versions of kernel.")
+		}
 	}
 }
 
