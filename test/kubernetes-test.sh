@@ -27,6 +27,7 @@ helm template --validate install/kubernetes/cilium \
   --set ipv6.enabled=true \
   --set identityChangeGracePeriod="0s" \
   --set kubeProxyReplacement=probe \
+  --set cni.chainingMode=portmap \
   > cilium.yaml
 
 kubectl apply -f cilium.yaml
@@ -78,6 +79,8 @@ export KUBE_MASTER_IP=192.168.36.11
 export KUBE_MASTER_URL="https://192.168.36.11:6443"
 
 echo "Running upstream services conformance tests"
+${HOME}/go/bin/kubetest --provider=local --test \
+  --test_args="--ginkgo.focus=HostPort.*\[Conformance\].* --e2e-verify-service-account=false --host ${KUBE_MASTER_URL}"
 ${HOME}/go/bin/kubetest --provider=local --test \
   --test_args="--ginkgo.focus=Services.*\[Conformance\].* --e2e-verify-service-account=false --host ${KUBE_MASTER_URL}"
 

@@ -946,6 +946,11 @@ func (s *linuxPrivilegedIPv4OnlyTestSuite) TestArpPingHandling(c *check.C) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
+	prevEnableL2NeighDiscovery := option.Config.EnableL2NeighDiscovery
+	defer func() { option.Config.EnableL2NeighDiscovery = prevEnableL2NeighDiscovery }()
+
+	option.Config.EnableL2NeighDiscovery = true
+
 	prevStateDir := option.Config.StateDir
 	defer func() { option.Config.StateDir = prevStateDir }()
 
@@ -1404,8 +1409,9 @@ func (s *linuxPrivilegedIPv4OnlyTestSuite) TestArpPingHandling(c *check.C) {
 	}
 	c.Assert(found, check.Equals, false)
 
+	now = time.Now()
 	c.Assert(linuxNodeHandler.NodeAdd(nodev3), check.IsNil)
-	time.Sleep(100 * time.Millisecond) // insertNeighbor is invoked async
+	wait(nodev3.Identity(), &now, false)
 
 	nextHop = net.ParseIP("9.9.9.250")
 	// Check that both node{2,3} are via nextHop (gw)

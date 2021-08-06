@@ -47,6 +47,7 @@ import (
 	"github.com/cilium/cilium/pkg/maps/signalmap"
 	"github.com/cilium/cilium/pkg/maps/sockmap"
 	"github.com/cilium/cilium/pkg/maps/tunnel"
+	"github.com/cilium/cilium/pkg/netns"
 	"github.com/cilium/cilium/pkg/node"
 	"github.com/cilium/cilium/pkg/option"
 
@@ -226,10 +227,6 @@ func (h *HeaderfileWriter) WriteNodeConfig(w io.Writer, cfg *datapath.LocalNodeC
 		cDefinesMap["ENABLE_EGRESS_GATEWAY"] = "1"
 	}
 
-	if option.Config.EnableEndpointRoutes {
-		cDefinesMap["ENABLE_ENDPOINT_ROUTES"] = "1"
-	}
-
 	if option.Config.EnableHostReachableServices {
 		if option.Config.EnableHostServicesTCP {
 			cDefinesMap["ENABLE_HOST_SERVICES_TCP"] = "1"
@@ -242,6 +239,18 @@ func (h *HeaderfileWriter) WriteNodeConfig(w io.Writer, cfg *datapath.LocalNodeC
 		}
 		if option.Config.EnableHostServicesPeer {
 			cDefinesMap["ENABLE_HOST_SERVICES_PEER"] = "1"
+		}
+		if cookie, err := netns.GetNetNSCookie(); err == nil {
+			// When running in nested environments (e.g. Kind), cilium-agent does
+			// not run in the host netns. So, in such cases the cookie comparison
+			// based on bpf_get_netns_cookie(NULL) for checking whether a socket
+			// belongs to a host netns does not work.
+			//
+			// To fix this, we derive the cookie of the netns in which cilium-agent
+			// runs via getsockopt(...SO_NETNS_COOKIE...) and then use it in the
+			// check above. This is based on an assumption that cilium-agent
+			// always runs with "hostNetwork: true".
+			cDefinesMap["HOST_NETNS_COOKIE"] = fmt.Sprintf("%d", cookie)
 		}
 	}
 
@@ -804,6 +813,10 @@ func (h *HeaderfileWriter) writeTemplateConfig(fw *bufio.Writer, e datapath.Endp
 
 	if e.RequireRouting() {
 		fmt.Fprintf(fw, "#define ENABLE_ROUTING 1\n")
+	}
+
+	if e.RequireEndpointRoute() {
+		fmt.Fprintf(fw, "#define ENABLE_ENDPOINT_ROUTES 1\n")
 	}
 
 	if e.DisableSIPVerification() {
