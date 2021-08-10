@@ -1,4 +1,4 @@
-# Copyright 2017-2020 Authors of Cilium
+# Copyright 2017-2021 Authors of Cilium
 # SPDX-License-Identifier: Apache-2.0
 
 ##@ Default
@@ -59,13 +59,9 @@ DOCKER_FLAGS ?=
 
 TEST_LDFLAGS=-ldflags "-X github.com/cilium/cilium/pkg/kvstore.consulDummyAddress=https://consul:8443 \
 	-X github.com/cilium/cilium/pkg/kvstore.etcdDummyAddress=http://etcd:4002 \
-	-X github.com/cilium/cilium/pkg/testutils.CiliumRootDir=$(ROOT_DIR) \
 	-X github.com/cilium/cilium/pkg/datapath.DatapathSHA256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 
-TEST_UNITTEST_LDFLAGS= -ldflags "-X github.com/cilium/cilium/pkg/kvstore.consulDummyConfigFile=/tmp/cilium-consul-certs/cilium-consul.yaml \
-	-X github.com/cilium/cilium/pkg/testutils.CiliumRootDir=$(ROOT_DIR) \
-	-X github.com/cilium/cilium/pkg/datapath.DatapathSHA256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 \
-	-X github.com/cilium/cilium/pkg/logging.DefaultLogLevelStr=$(LOGLEVEL)"
+TEST_UNITTEST_LDFLAGS=-ldflags "-X github.com/cilium/cilium/pkg/datapath.DatapathSHA256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 
 define print_help_line
 	@printf "  \033[36m%-29s\033[0m %s.\n" $(1) $(2)
@@ -136,9 +132,9 @@ $(SUBDIRS): force ## Execute default make target(make all) for the provided subd
 
 PRIV_TEST_PKGS_EVAL := $(shell for pkg in $(TESTPKGS); do echo $$pkg; done | xargs grep --include='*.go' -ril '+build [^!]*privileged_tests' | xargs dirname | sort | uniq)
 PRIV_TEST_PKGS ?= $(PRIV_TEST_PKGS_EVAL)
-tests-privileged: GO_TAGS_FLAGS+=privileged_tests ## Run unit-tests for Cilium that requires elevated privileges.
+tests-privileged: GO_TAGS_FLAGS+=privileged_tests ## Run integration-tests for Cilium that requires elevated privileges.
 tests-privileged:
-	# cilium-map-migrate is a dependency of some unit tests.
+	# cilium-map-migrate is a dependency of some integration tests.
 	$(QUIET) $(MAKE) $(SUBMAKEOPTS) -C bpf cilium-map-migrate
 	$(MAKE) init-coverage
 	for pkg in $(patsubst %,github.com/cilium/cilium/%,$(PRIV_TEST_PKGS)); do \
@@ -148,7 +144,7 @@ tests-privileged:
 	done
 	$(MAKE) generate-cov
 
-start-kvstores: ## Start running kvstores required for running Cilium unit-tests. More specifically this will run etcd and consul containers.
+start-kvstores: ## Start running kvstores required for running Cilium integration-tests. More specifically this will run etcd and consul containers.
 ifeq ($(SKIP_KVSTORES),"false")
 	@echo Starting key-value store containers...
 	-$(QUIET)$(CONTAINER_ENGINE) rm -f "cilium-etcd-test-container" 2> /dev/null
@@ -184,7 +180,7 @@ ifeq ($(SKIP_KVSTORES),"false")
 	$(QUIET)rm -rf /tmp/cilium-consul-certs
 endif
 
-generate-cov: ## Generate coverage report for Cilium unit-tests.
+generate-cov: ## Generate coverage report for Cilium integration-tests.
 	# Remove generated code from coverage
 	$(QUIET) grep -Ev '(^github.com/cilium/cilium/api/v1)|(generated.deepcopy.go)|(^github.com/cilium/cilium/pkg/k8s/client/)' \
 		coverage-all-tmp.out > coverage-all.out
@@ -192,14 +188,14 @@ generate-cov: ## Generate coverage report for Cilium unit-tests.
 	$(QUIET) rm coverage.out coverage-all-tmp.out
 	@rmdir ./daemon/1 ./daemon/1_backup 2> /dev/null || true
 
-init-coverage: ## Initialize converage report for Cilium unit-tests.
+init-coverage: ## Initialize converage report for Cilium integration-tests.
 	$(QUIET) echo "mode: count" > coverage-all-tmp.out
 	$(QUIET) echo "mode: count" > coverage.out
 
-unit-tests: start-kvstores ## Runs all unit-tests for Cilium.
+integration-tests: GO_TAGS_FLAGS+=integration_tests
+integration-tests: start-kvstores ## Runs all integration-tests for Cilium.
 	$(QUIET) $(MAKE) $(SUBMAKEOPTS) -C tools/maptool/
 	$(QUIET) $(MAKE) $(SUBMAKEOPTS) -C test/bpf/
-	test/bpf/unit-test
 ifeq ($(SKIP_VET),"false")
 	$(MAKE) govet
 endif
@@ -216,9 +212,10 @@ endif
 	$(MAKE) generate-cov
 	$(MAKE) stop-kvstores
 
-bench: start-kvstores ## Run benchmarks for Cilium unit-tests in the repository.
+bench: start-kvstores ## Run benchmarks for Cilium integration-tests in the repository.
 	# Process the packages in different subshells. See comment in the
-	# "unit-tests" target above for an explanation.## Builds components required for cilium-agent container.
+	# "integration-tests" target above for an explanation.## Builds components
+	# required for cilium-agent container.
 	$(QUIET)for pkg in $(patsubst %,github.com/cilium/cilium/%,$(TESTPKGS)); do \
 		$(GO_TEST) $(TEST_UNITTEST_LDFLAGS) $(GOTEST_BASE) $(BENCHFLAGS) \
 			$$pkg \
@@ -229,7 +226,7 @@ bench: start-kvstores ## Run benchmarks for Cilium unit-tests in the repository.
 bench-privileged: GO_TAGS_FLAGS+=privileged_tests ## Run benchmarks for priviliged tests.
 bench-privileged:
 	# Process the packages in different subshells. See comment in the
-	# "unit-tests" target above for an explanation.
+	# "integration-tests" target above for an explanation.
 	$(QUIET)for pkg in $(patsubst %,github.com/cilium/cilium/%,$(TESTPKGS)); do \
 		$(GO_TEST) $(TEST_UNITTEST_LDFLAGS) $(GOTEST_BASE) $(BENCHFLAGS) $$pkg \
 		|| exit 1; \
@@ -476,9 +473,10 @@ govet: ## Run govet on Go source files in the repository.
     ./test/k8sT/... \
     ./tools/...
 
-lint: ## Run golangci-lint.
+lint: ## Run golangci-lint and check if the helper headers in bpf/mock are up-to-date.
 	@$(ECHO_CHECK) golangci-lint
 	$(QUIET) golangci-lint run
+	$(QUIET) $(MAKE) $(SUBMAKEOPTS) -C bpf/mock/ check_helper_headers
 
 logging-subsys-field: ## Validate logrus subsystem field for logs in Go source code.
 	@$(ECHO_CHECK) contrib/scripts/check-logging-subsys-field.sh
