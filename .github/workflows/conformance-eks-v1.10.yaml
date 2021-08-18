@@ -63,6 +63,7 @@ concurrency:
 env:
   clusterName: ${{ github.repository_owner }}-${{ github.event.repository.name }}-${{ github.run_id }}
   region: us-east-2
+  cilium_cli_version: v0.8.6
   check_url: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
 jobs:
@@ -79,13 +80,6 @@ jobs:
     outputs:
       tested: ${{ steps.tested-tree.outputs.src }}
     steps:
-      - name: Retrieve pull request's base and head
-        if: ${{ github.event.issue.pull_request }}
-        id: pr
-        run: |
-          curl ${{ github.event.issue.pull_request.url }} > pr.json
-          echo "::set-output name=base::$(jq -r '.base.sha' pr.json)"
-          echo "::set-output name=head::$(jq -r '.head.sha' pr.json)"
       # Because we run on issue comments, we need to checkout the code for
       # paths-filter to work.
       - name: Checkout code
@@ -93,6 +87,13 @@ jobs:
         uses: actions/checkout@5a4ac9002d0be2fb38bd78e4b4dbde5606d7042f
         with:
           persist-credentials: false
+      - name: Retrieve pull request's base and head
+        if: ${{ github.event.issue.pull_request }}
+        id: pr
+        run: |
+          curl ${{ github.event.issue.pull_request.url }} > pr.json
+          echo "::set-output name=base::$(jq -r '.base.sha' pr.json)"
+          echo "::set-output name=head::$(jq -r '.head.sha' pr.json)"
       - name: Check code changes
         if: ${{ github.event.issue.pull_request }}
         uses: dorny/paths-filter@b2feaf19c27470162a626bd6fa8438ae5b263721
@@ -158,8 +159,7 @@ jobs:
 
       - name: Install Cilium CLI
         run: |
-          export CILUM_CLI_VERSION=$(curl -s https://raw.githubusercontent.com/cilium/cilium-cli/master/stable.txt)
-          curl -sSL --remote-name-all https://github.com/cilium/cilium-cli/releases/download/$CILUM_CLI_VERSION/cilium-linux-amd64.tar.gz{,.sha256sum}
+          curl -sSL --remote-name-all https://github.com/cilium/cilium-cli/releases/download/${{ env.cilium_cli_version }}/cilium-linux-amd64.tar.gz{,.sha256sum}
           sha256sum --check cilium-linux-amd64.tar.gz.sha256sum
           sudo tar xzvfC cilium-linux-amd64.tar.gz /usr/local/bin
           rm cilium-linux-amd64.tar.gz{,.sha256sum}
@@ -269,7 +269,11 @@ jobs:
 
       - name: Run connectivity test
         run: |
-          cilium connectivity test --force-deploy --flow-validation=disabled
+          cilium connectivity test --force-deploy --flow-validation=disabled \
+            --test '!client-egress-l7,!echo-ingress-l7'
+      # workaround for L7 tests issues on EKS with IPsec enabled
+      # TODO: remove both test exceptions once:
+      # - https://github.com/cilium/cilium/issues/17139 is fixed
 
       - name: Post-test information gathering
         if: ${{ !success() }}

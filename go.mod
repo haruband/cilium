@@ -15,7 +15,7 @@ require (
 	github.com/aws/aws-sdk-go-v2 v1.8.0
 	github.com/aws/aws-sdk-go-v2/config v1.6.0
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.4.0
-	github.com/aws/aws-sdk-go-v2/service/ec2 v1.9.0
+	github.com/aws/aws-sdk-go-v2/service/ec2 v1.13.0
 	github.com/aws/smithy-go v1.7.0
 	github.com/blang/semver/v4 v4.0.0
 	github.com/cilium/customvet v0.0.0-20201209211516-9852765c1ac4
@@ -54,7 +54,7 @@ require (
 	github.com/ishidawataru/sctp v0.0.0-20180213033435-07191f837fed // indirect
 	github.com/jeremywohl/flatten v1.0.1
 	github.com/kevinburke/ssh_config v0.0.0-20201106050909-4977a11b4351
-	github.com/kr/pretty v0.2.1
+	github.com/kr/pretty v0.3.0
 	github.com/mattn/go-shellwords v1.0.12
 	github.com/miekg/dns v1.1.26
 	github.com/morikuni/aec v1.0.0 // indirect
