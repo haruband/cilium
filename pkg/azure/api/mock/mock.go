@@ -82,8 +82,12 @@ func (a *API) UpdateSubnets(subnets []*ipamTypes.Subnet) {
 
 func (a *API) UpdateInstances(instances *ipamTypes.InstanceMap) {
 	a.mutex.Lock()
-	a.instances = instances.DeepCopy()
+	a.updateInstancesLocked(instances)
 	a.mutex.Unlock()
+}
+
+func (a *API) updateInstancesLocked(instances *ipamTypes.InstanceMap) {
+	a.instances = instances.DeepCopy()
 }
 
 // SetMockError modifies the mock API to return an error for a particular
@@ -182,8 +186,8 @@ func (a *API) AssignPrivateIpAddressesVMSS(ctx context.Context, vmName, vmssName
 	}
 
 	foundInterface := false
-
-	err := a.instances.ForeachInterface("", func(id, _ string, iface ipamTypes.InterfaceRevision) error {
+	instances := a.instances.DeepCopy()
+	err := instances.ForeachInterface("", func(id, _ string, iface ipamTypes.InterfaceRevision) error {
 		intf, ok := iface.Resource.(*types.AzureInterface)
 		if !ok {
 			return fmt.Errorf("invalid interface object")
@@ -220,6 +224,8 @@ func (a *API) AssignPrivateIpAddressesVMSS(ctx context.Context, vmName, vmssName
 	if err != nil {
 		return err
 	}
+
+	a.updateInstancesLocked(instances)
 
 	if !foundInterface {
 		return fmt.Errorf("interface %s not found", interfaceName)

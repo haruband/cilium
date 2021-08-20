@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2021 Authors of Cilium
+
 package netns
 
 import (
@@ -12,6 +15,7 @@ func GetNetNSCookie() (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
+	defer unix.Close(s)
 
 	cookie, err := unix.GetsockoptUint64(s, unix.SOL_SOCKET, SO_NETNS_COOKIE)
 	if err != nil {

@@ -32,16 +32,20 @@ helm template --validate install/kubernetes/cilium \
 
 kubectl apply -f cilium.yaml
 
-while true; do
-    result=$(kubectl -n kube-system get pods -l k8s-app=cilium | grep "Running" -c)
-    echo "Running pods ${result}"
-    if [ "${result}" == "2" ]; then
+runningPods="0"
 
-        echo "result match, continue with kubernetes"
-        break
-    fi
+pollCiliumPods () {
+  until [ "${runningPods}" == "2" ]; do
+    runningPods=$(kubectl -n kube-system get pods -l k8s-app=cilium | grep "Running" -c)
+    echo "Running Pods ${runningPods}"
     sleep 1
-done
+  done
+  echo "result match, continue with kubernetes"
+}
+
+export -f pollCiliumPods
+timeout ${POLL_TIMEOUT_SECONDS} bash -c pollCiliumPods
+unset pollCiliumPods
 
 set -e
 
@@ -66,7 +70,7 @@ test -d kubernetes && rm -rfv kubernetes
 git clone https://github.com/kubernetes/kubernetes.git -b ${KUBERNETES_VERSION} --depth 1
 cd kubernetes
 
-GO_VERSION="1.16.5"
+GO_VERSION="1.16.7"
 sudo rm -fr /usr/local/go
 curl -LO https://dl.google.com/go/go${GO_VERSION}.linux-amd64.tar.gz
 sudo tar -C /usr/local -xzf go${GO_VERSION}.linux-amd64.tar.gz
